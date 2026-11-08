@@ -152,7 +152,6 @@ class FilamentScene(
             .build(engine, rim)
         scene.addEntity(rim)
 
-        view.isShadowingEnabled = shadows
         configureQuality()
 
         materials = UbershaderProvider(engine)
@@ -279,7 +278,6 @@ class FilamentScene(
         shadows = on
         val lm = engine.lightManager
         lm.setShadowCaster(lm.getInstance(sun), on)
-        view.isShadowingEnabled = on
         configureQuality()
         dirty = true
     }
