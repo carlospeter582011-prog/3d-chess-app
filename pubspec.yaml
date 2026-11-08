@@ -1,0 +1,26 @@
+name: chess3d
+description: 3D Chess - a Staunton set rendered natively (Filament), Stockfish bot at any Elo, fully offline.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # Stockfish runs on the device (FFI). The only plugin: sound, storage and 3D are written natively in Kotlin.
+  # Vendored copy of stockfish 1.8.1 (fetched + patched by tools/build.sh, kept in the project zip).
+  stockfish:
+    path: packages/stockfish
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/models/
+    - assets/icon/icon.png
