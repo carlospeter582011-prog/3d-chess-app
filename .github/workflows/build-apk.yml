@@ -47,7 +47,7 @@ jobs:
           mkdir -p dist
           zip -rq dist/chess3d_flutter_project.zip . \
             -x ".git/*" "build/*" ".dart_tool/*" "dist/*" "tools/node_modules/*" "android/.gradle/*" "android/local.properties" \
-               "android/app/build/*" "android/build/*" "*.log" ".flutter-plugins*" ".idea/*"
+               "android/app/build/*" "android/build/*" "*/.cxx/*" "packages/*/android/build/*" "*.log" ".flutter-plugins*" ".idea/*"
           ls -la dist
 
       - name: Upload artifacts

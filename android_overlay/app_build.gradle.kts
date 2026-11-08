@@ -33,7 +33,13 @@ android {
         }
     }
 
-    packaging { jniLibs { pickFirsts += listOf("**/libc++_shared.so") } }
+    packaging {
+        jniLibs {
+            pickFirsts += listOf("**/libc++_shared.so")
+            // arm64 only (the Filament AARs ship every ABI and abiFilters alone does not drop them)
+            excludes += listOf("lib/x86/**", "lib/x86_64/**", "lib/armeabi-v7a/**")
+        }
+    }
 }
 
 flutter { source = "../.." }
