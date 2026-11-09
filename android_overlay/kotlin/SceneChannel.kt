@@ -55,6 +55,10 @@ class SceneChannel(private val ctx: Context, private val engine: FlutterEngine) 
                     scene?.setShadows(call.argument<Boolean>("on") ?: true)
                     result.success(null)
                 }
+                "setLabels" -> {
+                    scene?.setLabels(call.argument<Boolean>("on") ?: true)
+                    result.success(null)
+                }
                 "frame" -> {
                     val f = call.arguments
                     if (f is FloatArray) scene?.setFrame(f)

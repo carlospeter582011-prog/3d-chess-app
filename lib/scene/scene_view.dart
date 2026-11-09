@@ -1,17 +1,15 @@
 // The 3D board widget: shows the native Filament texture, turns touches into camera moves / taps, drives the
-// per-frame update (tweens, camera damping) and draws the a-h / 1-8 coordinate labels on top.
+// per-frame update (tweens, camera damping). The a-h / 1-8 coordinates are real quads on the board frame inside the
+// native scene (labels.glb), not a Flutter overlay.
 
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import 'board_model.dart';
-import 'board_scene.dart';
-import 'math3.dart';
 import 'scene_renderer.dart';
 
 class SceneView extends StatefulWidget {
@@ -22,6 +20,7 @@ class SceneView extends StatefulWidget {
     required this.onTap,
     required this.onEvent,
     this.shadows = true,
+    this.renderScaleCap = 2.0,
   });
 
   final BoardModel model;
@@ -33,6 +32,9 @@ class SceneView extends StatefulWidget {
   /// Loading progress / completion / failure from the native renderer.
   final void Function(SceneEvent event) onEvent;
   final bool shadows;
+
+  /// Upper limit of the render-resolution multiplier (graphics preset).
+  final double renderScaleCap;
 
   @override
   State<SceneView> createState() => _SceneViewState();
@@ -47,6 +49,7 @@ class _SceneViewState extends State<SceneView> with SingleTickerProviderStateMix
   bool _ready = false;
   int _texW = 0, _texH = 0;
   final ValueNotifier<int> _frame = ValueNotifier<int>(0);
+  bool _labelsSent = true; // the native scene starts with the labels shown
 
   // pointer tracking
   final Map<int, Offset> _pointers = {};
@@ -89,6 +92,11 @@ class _SceneViewState extends State<SceneView> with SingleTickerProviderStateMix
   void _onTick(Duration elapsed) {
     final dt = (elapsed - _last).inMicroseconds / 1e6;
     _last = elapsed;
+    if (_ready && _labelsSent != widget.model.labelsVisible) {
+      _labelsSent = widget.model.labelsVisible;
+      unawaited(widget.renderer.setLabels(_labelsSent));
+      widget.model.requestRender();
+    }
     final changed = widget.model.tick(dt);
     if (changed) {
       _frame.value++;
@@ -97,8 +105,7 @@ class _SceneViewState extends State<SceneView> with SingleTickerProviderStateMix
   }
 
   Future<void> _ensureTexture(double w, double h, double dpr) async {
-    final cap = widget.shadows ? 2.0 : 1.25;
-    final scale = math.min(dpr, cap);
+    final scale = math.min(dpr, widget.renderScaleCap);
     final pw = math.max(2, (w * scale).round()), ph = math.max(2, (h * scale).round());
     if (_textureId == null) {
       if (_creating) return;
@@ -206,75 +213,8 @@ class _SceneViewState extends State<SceneView> with SingleTickerProviderStateMix
         child: Stack(fit: StackFit.expand, children: [
           const ColoredBox(color: Color(0xFF15110E)),
           if (_textureId != null) Texture(textureId: _textureId!, filterQuality: FilterQuality.medium),
-          if (_ready)
-            IgnorePointer(
-              child: RepaintBoundary(
-                child: CustomPaint(painter: LabelsPainter(widget.model, _frame)),
-              ),
-            ),
         ]),
       );
     });
   }
-}
-
-/// a-h and 1-8 around the board, drawn from the projected 3D positions so they follow the camera.
-class LabelsPainter extends CustomPainter {
-  LabelsPainter(this.model, Listenable repaint) : super(repaint: repaint);
-  final BoardModel model;
-
-  static const double _fontSize = 36;
-  static final Map<String, TextPainter> _cache = {};
-
-  static TextPainter _tp(String text) => _cache.putIfAbsent(text, () {
-        final tp = TextPainter(
-          text: TextSpan(
-            text: text,
-            style: const TextStyle(fontSize: _fontSize, fontWeight: FontWeight.w600, color: Color(0xD9F0DEBE)),
-          ),
-          textDirection: ui.TextDirection.ltr,
-        )..layout();
-        return tp;
-      });
-
-  /// World positions and texts of the 32 labels (testable).
-  static List<({String text, V3 pos})> labelPositions() {
-    final out = <({String text, V3 pos})>[];
-    // Keep coordinates on the wooden rim instead of floating over the pieces.
-    const y = surfaceY - 0.075;
-    for (var i = 0; i < 8; i++) {
-      final letter = String.fromCharCode(97 + i);
-      out.add((text: letter, pos: V3(i - 3.5, y, 4.3)));
-      out.add((text: letter, pos: V3(i - 3.5, y, -4.3)));
-      out.add((text: '${i + 1}', pos: V3(-4.3, y, 3.5 - i)));
-      out.add((text: '${i + 1}', pos: V3(4.3, y, 3.5 - i)));
-    }
-    return out;
-  }
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (!model.labelsVisible) return;
-    final cam = model.camera;
-    final w = size.width, h = size.height;
-    final tanHalf = math.tan(degToRad(cam.fov) / 2);
-    final fwd = cam.basis.forward;
-    final eye = cam.eye;
-    for (final l in labelPositions()) {
-      final s = cam.project(l.pos, w, h);
-      if (s == null) continue;
-      final depth = (l.pos - eye).dot(fwd);
-      final pxPerUnit = h / (2 * tanHalf * depth);
-      final scale = pxPerUnit * 0.25 / _fontSize;
-      final tp = _tp(l.text);
-      canvas.save();
-      canvas.translate(s.x, s.y);
-      canvas.scale(scale);
-      tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
-      canvas.restore();
-    }
-  }
-
-  @override
-  bool shouldRepaint(LabelsPainter old) => true;
 }

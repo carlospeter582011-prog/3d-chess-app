@@ -1,0 +1,110 @@
+name: Android APK and AAB
+
+# Validates every change (analyze + tests + release APK + AAB) and publishes both files to a GitHub Release
+# after a successful push build. Pull requests are built and validated but never published.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/board-camera-admob-enhancements
+      - main
+  pull_request:
+    paths:
+      - 'lib/**'
+      - 'test/**'
+      - 'assets/**'
+      - 'android_overlay/**'
+      - 'pubspec.yaml'
+      - 'tools/**'
+      - '.github/workflows/android-apk.yml'
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      # Optional production signing. Add these four repository secrets to get a Play-ready signed build;
+      # without them the files are debug-signed test builds.
+      HAS_RELEASE_KEY: ${{ secrets.CHESS_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Restore release keystore (only when the secret exists)
+        if: env.HAS_RELEASE_KEY == 'true'
+        env:
+          KS_B64: ${{ secrets.CHESS_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          echo "CHESS_KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+          echo "CHESS_KEYSTORE_PASSWORD=${{ secrets.CHESS_KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "CHESS_KEY_ALIAS=${{ secrets.CHESS_KEY_ALIAS }}" >> "$GITHUB_ENV"
+          echo "CHESS_KEY_PASSWORD=${{ secrets.CHESS_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+
+      - name: Analyze, test, build APK and AAB
+        run: |
+          set -o pipefail
+          bash tools/build.sh 2>&1 | tee build.log
+
+      - name: Surface errors as annotations
+        if: failure()
+        run: |
+          grep -n -E "^e: |error •|error:|Error:|FAILED|What went wrong|Exception|Could not|Unresolved|Execution failed|Some tests failed|\[E\]" build.log | head -40 | while IFS= read -r l; do echo "::error::${l:0:400}"; done || true
+
+      - name: Verify the packages contain the latest assets
+        run: |
+          unzip -l dist/chess3d-release.apk | grep -E "flutter_assets/assets/models/(labels|board)\.glb"
+          unzip -l dist/chess3d-release.aab | grep -E "flutter_assets/assets/models/labels\.glb"
+          ls -la dist
+
+      - name: Upload APK and AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: chess3d-android-builds
+          path: |
+            dist/chess3d-release.apk
+            dist/chess3d-release.aab
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
+
+      - name: Publish APK and AAB to GitHub Releases
+        if: success() && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v1.0.0-android-build${{ github.run_number }}"
+          if [ "$HAS_RELEASE_KEY" = "true" ]; then
+            SIGN="Signed with the release keystore from repository secrets."
+          else
+            SIGN="Signed with the DEBUG key: a test build for sideloading, NOT accepted by Google Play."
+          fi
+          gh release create "$TAG" \
+            dist/chess3d-release.apk \
+            dist/chess3d-release.aab \
+            --title "3D Chess Android $TAG" \
+            --target "${{ github.sha }}" \
+            --prerelease \
+            --notes "Commit ${{ github.sha }}. $SIGN AdMob TEST IDs only. Android 6.0+ (API 23), arm64-v8a, OpenGL ES 3.0. Analyze and unit/widget tests passed in CI; not yet verified on a physical device."

@@ -8,7 +8,26 @@ enum GameMode { bot, local }
 
 enum GameStatus { playing, checkmate, stalemate, draw, resigned }
 
-enum Quality { high, low }
+/// Graphics preset. [auto] resolves ONCE at app start from the device class (see [GraphicsPreset]); it never changes
+/// by itself while a game is running.
+enum Quality { auto, high, medium, low }
+
+/// What a preset changes in the renderer.
+class GraphicsPreset {
+  const GraphicsPreset({required this.shadows, required this.renderScaleCap});
+
+  /// Real-time shadows + 4x MSAA.
+  final bool shadows;
+
+  /// Upper limit for the render-resolution multiplier (physical pixels per logical pixel).
+  final double renderScaleCap;
+
+  static GraphicsPreset of(Quality q) => switch (q) {
+        Quality.high || Quality.auto => const GraphicsPreset(shadows: true, renderScaleCap: 2.0),
+        Quality.medium => const GraphicsPreset(shadows: true, renderScaleCap: 1.5),
+        Quality.low => const GraphicsPreset(shadows: false, renderScaleCap: 1.25),
+      };
+}
 
 /// What the menu stores for "your colour": a side or a random pick.
 enum HumanColor { white, black, random }
@@ -49,7 +68,7 @@ class Settings {
   const Settings({
     this.sound = true,
     this.labels = true,
-    this.quality = Quality.high,
+    this.quality = Quality.auto,
     this.autoFlip = false,
     this.elo = 1200,
     this.humanColor = HumanColor.white,
@@ -101,7 +120,7 @@ class Settings {
       return Settings(
         sound: j['sound'] is bool ? j['sound'] as bool : true,
         labels: j['labels'] is bool ? j['labels'] as bool : true,
-        quality: pick(Quality.values, j['quality'], Quality.high),
+        quality: pick(Quality.values, j['quality'], Quality.auto),
         autoFlip: j['autoFlip'] is bool ? j['autoFlip'] as bool : false,
         elo: j['elo'] is num ? (j['elo'] as num).round().clamp(400, 3200) : 1200,
         humanColor: pick(HumanColor.values, j['humanColor'], HumanColor.white),

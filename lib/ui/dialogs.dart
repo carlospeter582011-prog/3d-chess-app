@@ -135,7 +135,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
               const SizedBox(height: 10),
               _toggle(const Key('set-sound'), 'Sound effects', null, s.sound, (v) => _set(s.copyWith(sound: v))),
               _toggle(const Key('set-labels'), 'Board coordinates', 'a–h and 1–8 around the board', s.labels, (v) => _set(s.copyWith(labels: v))),
-              _toggle(const Key('set-flip'), 'Auto-turn view (2 players)', 'Rotates the camera to whoever moves next', s.autoFlip,
+              _toggle(const Key('set-flip'), 'Auto-flip board (2 players)', 'Turns the view 180° after every move, keeping zoom and tilt', s.autoFlip,
                   (v) => _set(s.copyWith(autoFlip: v))),
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
@@ -143,7 +143,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
                   const Expanded(
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text('Graphics', style: TextStyle(fontWeight: FontWeight.w700)),
-                      Text('Low turns off shadows (faster on old phones)', style: TextStyle(color: C.muted, fontSize: 12)),
+                      Text('Auto picks a preset for this device when the app starts; Low turns off shadows', style: TextStyle(color: C.muted, fontSize: 12)),
                     ]),
                   ),
                   DropdownButton<Quality>(
@@ -152,7 +152,9 @@ class _SettingsDialogState extends State<SettingsDialog> {
                     dropdownColor: const Color(0xFF2A2018),
                     underline: const SizedBox.shrink(),
                     items: const [
+                      DropdownMenuItem(value: Quality.auto, child: Text('Auto')),
                       DropdownMenuItem(value: Quality.high, child: Text('High')),
+                      DropdownMenuItem(value: Quality.medium, child: Text('Medium')),
                       DropdownMenuItem(value: Quality.low, child: Text('Low')),
                     ],
                     onChanged: (q) {

@@ -126,7 +126,7 @@ class MenuScreen extends StatelessWidget {
                     const Text('Stockfish runs on your device. Elo is approximate.', style: TextStyle(color: C.muted, fontSize: 12.5)),
                   ] else
                     const Text(
-                      'Pass the phone or tablet back and forth — no internet needed. Turn on “Auto-turn view” in settings to spin the board to the player whose turn it is.',
+                      'Pass the phone or tablet back and forth — no internet needed. Turn on “Auto-flip board” in settings to turn the view 180° to the player whose turn it is.',
                       style: TextStyle(color: C.muted, fontSize: 14, height: 1.4),
                     ),
                   const SizedBox(height: 16),
@@ -170,29 +170,48 @@ class _Seg<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(color: const Color(0xCC0B0907), borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
-        child: Row(children: [
-          for (final (label, v) in items)
-            Expanded(
+    padding: const EdgeInsets.all(4),
+    decoration: BoxDecoration(
+      color: const Color(0xFF17110E),
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: const Color(0xFF70583E)),
+    ),
+    child: Row(children: [
+      for (final (label, v) in items)
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: Material(
+              color: Colors.transparent,
               child: InkWell(
-                borderRadius: BorderRadius.circular(10),
                 onTap: () => onChanged(v),
-                child: Ink(
-                  padding: EdgeInsets.symmetric(vertical: small ? 10 : 12, horizontal: 6),
+                borderRadius: BorderRadius.circular(10),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding: EdgeInsets.symmetric(vertical: small ? 11 : 13, horizontal: 3),
                   decoration: BoxDecoration(
+                    color: v == value ? const Color(0xFFF2C977) : const Color(0xFF30251E),
                     borderRadius: BorderRadius.circular(10),
-                    color: v == value ? C.gold2 : const Color(0xFF292018),
-                    border: Border.all(color: v == value ? C.gold : const Color(0xFF554332), width: v == value ? 2 : 1),
+                    border: Border.all(
+                      color: v == value ? const Color(0xFFFFE4A6) : const Color(0xFF594536),
+                      width: v == value ? 2 : 1,
+                    ),
                   ),
-                  child: Center(
-                    child: Text(label,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: v == value ? const Color(0xFF211509) : const Color(0xFFF2E5D1))),
+                  child: Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    style: TextStyle(
+                      fontSize: small ? 13 : 14,
+                      fontWeight: FontWeight.w800,
+                      color: v == value ? const Color(0xFF201307) : Colors.white,
+                    ),
                   ),
                 ),
               ),
             ),
-        ]),
-      );
+          ),
+        ),
+    ]),
+  );
 }

@@ -12,6 +12,7 @@ import 'game/storage.dart';
 import 'scene/board_model.dart';
 import 'scene/scene_renderer.dart';
 import 'scene/scene_view.dart';
+import 'platform/ads_service.dart';
 import 'ui/dialogs.dart';
 import 'ui/hud.dart';
 import 'ui/loading.dart';
@@ -20,7 +21,17 @@ import 'ui/theme.dart';
 
 /// Everything the app needs from the outside world (replaced by fakes in tests).
 class AppDeps {
-  AppDeps({required this.model, required this.renderer, required this.engine, required this.store, required this.sfx});
+  AppDeps({
+    required this.model,
+    required this.renderer,
+    required this.engine,
+    required this.store,
+    required this.sfx,
+    this.autoQuality = Quality.high,
+  });
+
+  /// Preset chosen for this device at start-up; used when the setting is "Auto". Fixed for the whole session.
+  final Quality autoQuality;
   final BoardModel model;
   final SceneRenderer renderer;
   final BotEngine engine;
@@ -61,8 +72,15 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
   bool _wasActive = false;
   GameStatus _lastStatus = GameStatus.playing;
   final math.Random _rnd = math.Random();
+  late final AdsService _ads = AdsService(
+    // an App Open ad must never cover a game in progress
+    canShowAppOpen: () => !(game.snapshot.history.isNotEmpty && game.snapshot.status == GameStatus.playing),
+  );
 
   AppDeps get d => widget.deps;
+
+  GraphicsPreset get _preset =>
+      GraphicsPreset.of(settings.quality == Quality.auto ? d.autoQuality : settings.quality);
 
   @override
   void initState() {
@@ -73,26 +91,34 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     game = GameController(board: d.model, engine: d.engine, store: d.store, sfx: d.sfx);
     game.applySettings(settings);
     game.addListener(_onGame);
+    _ads.initialize();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     game.removeListener(_onGame);
+    _ads.dispose();
     game.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) d.model.requestRender();
+    if (state == AppLifecycleState.resumed) {
+      d.model.requestRender();
+      _ads.onResume();
+    }
   }
 
   void _onGame() {
     final s = game.snapshot;
     // result card when a game ends; attract-mode rotation only while the menu is up
     final over = s.status != GameStatus.playing && s.active;
-    if (over && (_lastStatus == GameStatus.playing || !_wasActive)) showResult = true;
+    if (over && (_lastStatus == GameStatus.playing || !_wasActive)) {
+      showResult = true;
+      _ads.onGameFinished();
+    }
     if (!over) showResult = false;
     _lastStatus = s.status;
     if (s.active != _wasActive) {
@@ -171,7 +197,8 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
               key: ValueKey('scene-$attempt'),
               model: d.model,
               renderer: d.renderer,
-              shadows: settings.quality == Quality.high,
+              shadows: _preset.shadows,
+              renderScaleCap: _preset.renderScaleCap,
               onTap: game.tap,
               onEvent: _onSceneEvent,
             ),

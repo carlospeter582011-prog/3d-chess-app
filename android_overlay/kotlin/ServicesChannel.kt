@@ -1,8 +1,10 @@
 package __PKG__
 
+import android.app.ActivityManager
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.SoundPool
+import android.os.Build
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -50,6 +52,18 @@ class ServicesChannel(private val ctx: Context, engine: FlutterEngine) : MethodC
                     f.writeBytes(wav)
                     sounds[name] = pool.load(f.absolutePath, 1)
                     result.success(null)
+                }
+                "deviceTier" -> {
+                    val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                    val mi = ActivityManager.MemoryInfo()
+                    am.getMemoryInfo(mi)
+                    val gb = mi.totalMem / 1.0e9
+                    val tier = when {
+                        am.isLowRamDevice || gb < 3.0 || Build.VERSION.SDK_INT < 26 -> "low"
+                        gb < 6.0 -> "medium"
+                        else -> "high"
+                    }
+                    result.success(tier)
                 }
                 "sfxPlay" -> {
                     val id = sounds[call.argument<String>("name")]
