@@ -171,7 +171,7 @@ class _Seg<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(color: const Color(0x59000000), borderRadius: BorderRadius.circular(14)),
+        decoration: BoxDecoration(color: const Color(0xCC0B0907), borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
         child: Row(children: [
           for (final (label, v) in items)
             Expanded(
@@ -182,12 +182,13 @@ class _Seg<T> extends StatelessWidget {
                   padding: EdgeInsets.symmetric(vertical: small ? 10 : 12, horizontal: 6),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(10),
-                    gradient: v == value ? const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [C.gold2, C.gold]) : null,
+                    color: v == value ? C.gold2 : const Color(0xFF292018),
+                    border: Border.all(color: v == value ? C.gold : const Color(0xFF554332), width: v == value ? 2 : 1),
                   ),
                   child: Center(
                     child: Text(label,
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: v == value ? C.onGold : C.muted)),
+                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: v == value ? const Color(0xFF211509) : const Color(0xFFF2E5D1))),
                   ),
                 ),
               ),
