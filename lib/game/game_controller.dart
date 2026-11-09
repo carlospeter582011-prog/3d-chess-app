@@ -380,7 +380,10 @@ class GameController extends ChangeNotifier {
     _refresh();
     _save();
     if (st.status == GameStatus.playing) {
-      if (config.mode == GameMode.local && autoFlip) board.resetCamera(animate: true, side: chess.turn);
+      if (config.mode == GameMode.local && autoFlip && board.viewSide() != chess.turn) {
+        // Keep the player's zoom, tilt and target; rotate exactly 180 degrees.
+        board.flipView();
+      }
       unawaited(_maybeBotMove());
     }
     return mv;
@@ -440,7 +443,10 @@ class GameController extends ChangeNotifier {
     syncBoard();
     _refresh();
     _save();
-    if (config.mode == GameMode.local && autoFlip) board.resetCamera(animate: true, side: chess.turn);
+    if (config.mode == GameMode.local && autoFlip && board.viewSide() != chess.turn) {
+        // Keep the player's zoom, tilt and target; rotate exactly 180 degrees.
+        board.flipView();
+      }
     unawaited(_maybeBotMove());
   }
 
