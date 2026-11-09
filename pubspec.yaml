@@ -9,7 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  google_mobile_ads: ^5.3.1
+  google_mobile_ads: ^7.0.0
   # Stockfish runs on the device (FFI). The only plugin: sound, storage and 3D are written natively in Kotlin.
   # Vendored copy of stockfish 1.8.1 (fetched + patched by tools/build.sh, kept in the project zip).
   stockfish:
