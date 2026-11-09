@@ -75,7 +75,7 @@ class OrbitCamera {
   double fitDistance() {
     final vfov = degToRad(fov);
     final hfov = 2 * math.atan(math.tan(vfov / 2) * aspect);
-    const need = 12.6; // world width/height we want visible around the board (frame + margin)
+    const need = 11.4; // world width/height we want visible around the board (frame + margin)
     final dH = need / 2 / math.tan(hfov / 2);
     final dV = (need * 0.82) / 2 / math.tan(vfov / 2);
     return math.max(dH, dV);
@@ -152,7 +152,7 @@ class OrbitCamera {
 
   /// side: true = look from White's side (+Z), false = Black's side (-Z).
   void reset({bool animate = true, bool whiteSide = true, bool top = false}) {
-    flyTo(fitDistance(), top ? 0.02 : degToRad(52), whiteSide ? 0 : math.pi, const V3(0, 0.4, 0), animate: animate);
+    flyTo(fitDistance(), top ? 0.02 : degToRad(43), whiteSide ? 0 : math.pi, const V3(0, 0.4, 0), animate: animate);
   }
 
   /// Flips the view to the other side of the board.
