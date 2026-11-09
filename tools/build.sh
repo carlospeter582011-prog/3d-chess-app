@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Builds the 3D Chess APK from this source tree.
+# Builds the 3D Chess APK and Android App Bundle (AAB) from this source tree.
 # Needs: Flutter (stable, Dart >= 3.3), JDK 17, Android SDK (platform 35 + NDK, installed automatically by Gradle),
 # internet access to pub.dev, Google Maven and Maven Central. Run from anywhere:
 #
-#   tools/build.sh                 # analyze + tests + release APK  -> dist/chess3d-release.apk
+#   tools/build.sh                 # analyze + tests + release APK + AAB -> dist/
 #   SKIP_TESTS=1 tools/build.sh    # skip flutter test
 #   DEBUG_APK=1  tools/build.sh    # also build a debug APK
 set -euo pipefail
@@ -62,14 +62,18 @@ echo "== build APK"
 mkdir -p "$OUT"
 flutter build apk --release --target-platform android-arm64
 cp build/app/outputs/flutter-apk/app-release.apk "$OUT/chess3d-release.apk"
+
+echo "== build AAB"
+flutter build appbundle --release --target-platform android-arm64
+cp build/app/outputs/bundle/release/app-release.aab "$OUT/chess3d-release.aab"
 if [ -n "${DEBUG_APK:-}" ]; then
   flutter build apk --debug --target-platform android-arm64
   cp build/app/outputs/flutter-apk/app-debug.apk "$OUT/chess3d-debug.apk"
 fi
 
 echo "== verify"
-for a in "$OUT"/*.apk; do
+for a in "$OUT"/*.apk "$OUT"/*.aab; do
   [ -s "$a" ] || { echo "EMPTY: $a"; exit 1; }
   echo "$(basename "$a"): $(stat -c %s "$a") bytes"
 done
-echo "Done. APK in $OUT"
+echo "Done. APK and AAB in $OUT"
