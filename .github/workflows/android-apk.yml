@@ -1,6 +1,10 @@
-name: Android APK validation
+name: Android APK and AAB
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/board-camera-admob-enhancements
+      - main
   pull_request:
     paths:
       - 'lib/**'
@@ -26,10 +30,13 @@ jobs:
           java-version: '17'
       - name: Build, analyze and test
         run: bash tools/build.sh
-      - name: Upload test APK
+      - name: Upload APK and AAB
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: chess3d-test-apk
-          path: dist/chess3d-release.apk
-          retention-days: 7
+          name: chess3d-android-builds
+          path: |
+            dist/chess3d-release.apk
+            dist/chess3d-release.aab
+          if-no-files-found: error
+          retention-days: 14
