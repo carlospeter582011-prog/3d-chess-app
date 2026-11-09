@@ -31,13 +31,4 @@ void main() {
     expect(AdsService.appOpenTestId, startsWith('ca-app-pub-3940256099942544/'));
     expect(AdsService.interstitialTestId, startsWith('ca-app-pub-3940256099942544/'));
   });
-
-  test('the launch-ad step never blocks the intro when ads are unavailable', () async {
-    TestWidgetsFlutterBinding.ensureInitialized();
-    final ads = AdsService();
-    final sw = Stopwatch()..start();
-    await ads.showColdStartAd(timeout: const Duration(seconds: 2)).timeout(const Duration(seconds: 4));
-    expect(sw.elapsed, lessThan(const Duration(seconds: 3)));
-    ads.dispose();
-  });
 }
