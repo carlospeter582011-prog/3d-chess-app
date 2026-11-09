@@ -3,6 +3,7 @@
 
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
@@ -257,19 +258,28 @@ class LabelsPainter extends CustomPainter {
     if (!model.labelsVisible) return;
     final cam = model.camera;
     final w = size.width, h = size.height;
-    final tanHalf = math.tan(degToRad(cam.fov) / 2);
-    final fwd = cam.basis.forward;
-    final eye = cam.eye;
+    // Project the board's X and Z axes too. Unlike screen-facing text, this
+    // affine transform makes every label lie in the board plane as the camera
+    // orbits, pans and zooms (similar to the web board's texture labels).
+    const worldLetterSize = 0.24;
+    final unit = worldLetterSize / _fontSize;
     for (final l in labelPositions()) {
-      final s = cam.project(l.pos, w, h);
-      if (s == null) continue;
-      final depth = (l.pos - eye).dot(fwd);
-      final pxPerUnit = h / (2 * tanHalf * depth);
-      final scale = pxPerUnit * 0.17 / _fontSize;
+      final p = cam.project(l.pos, w, h);
+      final px = cam.project(l.pos + const V3(1, 0, 0), w, h);
+      final pz = cam.project(l.pos + const V3(0, 0, 1), w, h);
+      if (p == null || px == null || pz == null) continue;
+      final dx = (px.x - p.x) * unit;
+      final dy = (px.y - p.y) * unit;
+      final zx = (pz.x - p.x) * unit;
+      final zy = (pz.y - p.y) * unit;
       final tp = _tp(l.text);
       canvas.save();
-      canvas.translate(s.x, s.y);
-      canvas.scale(scale);
+      canvas.transform(Float64List.fromList([
+        dx, dy, 0, 0,
+        zx, zy, 0, 0,
+        0, 0, 1, 0,
+        p.x, p.y, 0, 1,
+      ]));
       tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
       canvas.restore();
     }
