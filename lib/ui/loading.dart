@@ -3,10 +3,13 @@ import 'package:flutter/material.dart';
 import 'theme.dart';
 
 class LoadingScreen extends StatelessWidget {
-  const LoadingScreen({super.key, required this.done, required this.total, required this.error, required this.onRetry});
+  const LoadingScreen({super.key, required this.done, required this.total, required this.error, required this.onRetry, this.message});
   final int done, total;
   final String? error;
   final VoidCallback onRetry;
+
+  /// Replaces the "Loading 3D pieces" text (e.g. while the intro waits for the launch ad).
+  final String? message;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -35,7 +38,7 @@ class LoadingScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 10),
-            Text('Loading 3D pieces… $done/$total', key: const Key('load-text')),
+            Text(message ?? 'Loading 3D pieces… $done/$total', key: const Key('load-text')),
           ],
         ]),
       );

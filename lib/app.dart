@@ -1,5 +1,6 @@
 // App root: wires the scene, the game controller, settings and all screens together.
 
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -28,10 +29,20 @@ class AppDeps {
     required this.store,
     required this.sfx,
     this.autoQuality = Quality.high,
+    this.showIntro = false,
+    this.introMinimum = const Duration(milliseconds: 1500),
+    this.introAdTimeout = const Duration(seconds: 5),
   });
 
   /// Preset chosen for this device at start-up; used when the setting is "Auto". Fixed for the whole session.
   final Quality autoQuality;
+
+  /// Show the intro (logo + launch ad wait) before the menu. Off in widget tests.
+  final bool showIntro;
+  final Duration introMinimum;
+
+  /// Longest the intro waits for the App Open ad; after that the app starts without it.
+  final Duration introAdTimeout;
   final BoardModel model;
   final SceneRenderer renderer;
   final BotEngine engine;
@@ -74,8 +85,10 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
   final math.Random _rnd = math.Random();
   late final AdsService _ads = AdsService(
     // an App Open ad must never cover a game in progress
-    canShowAppOpen: () => !(game.snapshot.history.isNotEmpty && game.snapshot.status == GameStatus.playing),
+    canShowAppOpen: () =>
+        _introDone && !(game.snapshot.history.isNotEmpty && game.snapshot.status == GameStatus.playing),
   );
+  late bool _introDone = !d.showIntro;
 
   AppDeps get d => widget.deps;
 
@@ -91,7 +104,21 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     game = GameController(board: d.model, engine: d.engine, store: d.store, sfx: d.sfx);
     game.applySettings(settings);
     game.addListener(_onGame);
-    _ads.initialize();
+    if (d.showIntro) {
+      unawaited(_runIntro());
+    } else {
+      unawaited(_ads.initialize());
+    }
+  }
+
+  /// Intro: logo screen while the 3D scene loads and the launch ad gets a limited chance to load and be shown. The
+  /// menu stays hidden (and untouchable) until this is over, so no ad can ever appear once the player is using the app.
+  Future<void> _runIntro() async {
+    await Future.wait<void>([
+      Future<void>.delayed(d.introMinimum),
+      _ads.showColdStartAd(timeout: d.introAdTimeout),
+    ]);
+    if (mounted) setState(() => _introDone = true);
   }
 
   @override
@@ -247,9 +274,10 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
                 },
               ),
             ),
-          if (!ready)
+          if (!ready || !_introDone)
             Positioned.fill(
               child: LoadingScreen(
+                message: ready ? 'Starting…' : null,
                 done: done,
                 total: total,
                 error: error,
