@@ -30,6 +30,7 @@ Future<void> main() async {
       engine: UciEngine(StockfishTransport()),
       store: store,
       sfx: sfx,
+      autoQuality: await detectDeviceQuality(),
     ),
   ));
 }

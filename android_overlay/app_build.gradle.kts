@@ -18,16 +18,30 @@ android {
     defaultConfig {
         applicationId = "__PKG__"
         minSdk = 23          // Android 6.0; device must support OpenGL ES 3.0 and arm64
-        targetSdk = 35
+        targetSdk = 36       // Google Play requires API 36 for new apps and updates from 31 Aug 2026
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         ndk { abiFilters += listOf("arm64-v8a") }   // nearly all current phones; add "armeabi-v7a" / "x86_64" if you need them
     }
 
+    // Release signing comes from the environment (GitHub Actions secrets) and is NEVER stored in the repository.
+    // Without it the release build falls back to the debug key: fine for sideload testing, NOT accepted by Google Play.
+    val keystoreFile = System.getenv("CHESS_KEYSTORE_FILE")?.takeIf { it.isNotBlank() }?.let { file(it) }
+    val hasReleaseKey = keystoreFile != null && keystoreFile.exists()
+    signingConfigs {
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = keystoreFile
+                storePassword = System.getenv("CHESS_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("CHESS_KEY_ALIAS")
+                keyPassword = System.getenv("CHESS_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // Sideload build: signed with the debug key. Replace with your own keystore for Google Play.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseKey) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
             isMinifyEnabled = false
             isShrinkResources = false
         }

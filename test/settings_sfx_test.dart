@@ -13,7 +13,7 @@ void main() {
       const s = Settings();
       expect(s.sound, isTrue);
       expect(s.labels, isTrue);
-      expect(s.quality, Quality.high);
+      expect(s.quality, Quality.auto);
       expect(s.autoFlip, isFalse);
       expect(s.elo, 1200);
       expect(s.humanColor, HumanColor.white);
@@ -35,7 +35,7 @@ void main() {
       for (final bad in [null, '', 'garbage', '[]', '42', '{"elo":"x","quality":"ultra","mode":5}']) {
         final s = Settings.decode(bad);
         expect(s.elo, 1200, reason: '$bad');
-        expect(s.quality, Quality.high, reason: '$bad');
+        expect(s.quality, Quality.auto, reason: '$bad');
         expect(s.mode, GameMode.bot, reason: '$bad');
       }
     });
@@ -128,6 +128,22 @@ void main() {
       expect(bd.getUint32(40, Endian.little), samples.length * 2);
       expect(wav.length, 44 + samples.length * 2);
       expect(bd.getUint32(4, Endian.little), wav.length - 8);
+    });
+  });
+
+  group('graphics presets', () {
+    test('low drops shadows and lowers the render scale, high keeps both', () {
+      expect(GraphicsPreset.of(Quality.low).shadows, isFalse);
+      expect(GraphicsPreset.of(Quality.medium).shadows, isTrue);
+      expect(GraphicsPreset.of(Quality.high).shadows, isTrue);
+      expect(GraphicsPreset.of(Quality.low).renderScaleCap, lessThan(GraphicsPreset.of(Quality.medium).renderScaleCap));
+      expect(GraphicsPreset.of(Quality.medium).renderScaleCap, lessThan(GraphicsPreset.of(Quality.high).renderScaleCap));
+    });
+
+    test('every preset survives a save/load round trip', () {
+      for (final q in Quality.values) {
+        expect(Settings.decode(Settings(quality: q).encode()).quality, q);
+      }
     });
   });
 }

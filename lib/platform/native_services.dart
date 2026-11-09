@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import '../game/settings.dart' show Quality;
 import '../game/storage.dart';
 import 'sfx_synth.dart';
 
@@ -43,6 +44,20 @@ class ChannelStore implements KeyValueStore {
     unawaited(_services.invokeMethod<void>('storeRemove', {'key': key}).catchError((Object e) {
       debugPrint('storage remove failed: $e');
     }));
+  }
+}
+
+/// Graphics preset for this device, asked once at start-up (low RAM / old Android -> low, < 6 GB -> medium).
+Future<Quality> detectDeviceQuality() async {
+  try {
+    final tier = await _services.invokeMethod<String>('deviceTier');
+    return switch (tier) {
+      'low' => Quality.low,
+      'medium' => Quality.medium,
+      _ => Quality.high,
+    };
+  } catch (_) {
+    return Quality.high;
   }
 }
 

@@ -143,7 +143,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
                   const Expanded(
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text('Graphics', style: TextStyle(fontWeight: FontWeight.w700)),
-                      Text('Low turns off shadows (faster on old phones)', style: TextStyle(color: C.muted, fontSize: 12)),
+                      Text('Auto picks a preset for this device when the app starts; Low turns off shadows', style: TextStyle(color: C.muted, fontSize: 12)),
                     ]),
                   ),
                   DropdownButton<Quality>(
@@ -152,7 +152,9 @@ class _SettingsDialogState extends State<SettingsDialog> {
                     dropdownColor: const Color(0xFF2A2018),
                     underline: const SizedBox.shrink(),
                     items: const [
+                      DropdownMenuItem(value: Quality.auto, child: Text('Auto')),
                       DropdownMenuItem(value: Quality.high, child: Text('High')),
+                      DropdownMenuItem(value: Quality.medium, child: Text('Medium')),
                       DropdownMenuItem(value: Quality.low, child: Text('Low')),
                     ],
                     onChanged: (q) {

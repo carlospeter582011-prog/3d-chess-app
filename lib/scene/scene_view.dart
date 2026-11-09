@@ -20,6 +20,7 @@ class SceneView extends StatefulWidget {
     required this.onTap,
     required this.onEvent,
     this.shadows = true,
+    this.renderScaleCap = 2.0,
   });
 
   final BoardModel model;
@@ -31,6 +32,9 @@ class SceneView extends StatefulWidget {
   /// Loading progress / completion / failure from the native renderer.
   final void Function(SceneEvent event) onEvent;
   final bool shadows;
+
+  /// Upper limit of the render-resolution multiplier (graphics preset).
+  final double renderScaleCap;
 
   @override
   State<SceneView> createState() => _SceneViewState();
@@ -101,8 +105,7 @@ class _SceneViewState extends State<SceneView> with SingleTickerProviderStateMix
   }
 
   Future<void> _ensureTexture(double w, double h, double dpr) async {
-    final cap = widget.shadows ? 2.0 : 1.25;
-    final scale = math.min(dpr, cap);
+    final scale = math.min(dpr, widget.renderScaleCap);
     final pw = math.max(2, (w * scale).round()), ph = math.max(2, (h * scale).round());
     if (_textureId == null) {
       if (_creating) return;
