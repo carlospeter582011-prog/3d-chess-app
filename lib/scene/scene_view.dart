@@ -223,7 +223,7 @@ class LabelsPainter extends CustomPainter {
   LabelsPainter(this.model, Listenable repaint) : super(repaint: repaint);
   final BoardModel model;
 
-  static const double _fontSize = 48;
+  static const double _fontSize = 36;
   static final Map<String, TextPainter> _cache = {};
 
   static TextPainter _tp(String text) => _cache.putIfAbsent(text, () {
@@ -240,7 +240,8 @@ class LabelsPainter extends CustomPainter {
   /// World positions and texts of the 32 labels (testable).
   static List<({String text, V3 pos})> labelPositions() {
     final out = <({String text, V3 pos})>[];
-    const y = surfaceY + 0.004;
+    // Keep coordinates on the wooden rim instead of floating over the pieces.
+    const y = surfaceY - 0.075;
     for (var i = 0; i < 8; i++) {
       final letter = String.fromCharCode(97 + i);
       out.add((text: letter, pos: V3(i - 3.5, y, 4.3)));
@@ -264,7 +265,7 @@ class LabelsPainter extends CustomPainter {
       if (s == null) continue;
       final depth = (l.pos - eye).dot(fwd);
       final pxPerUnit = h / (2 * tanHalf * depth);
-      final scale = pxPerUnit * 0.42 / _fontSize * 0.85;
+      final scale = pxPerUnit * 0.25 / _fontSize;
       final tp = _tp(l.text);
       canvas.save();
       canvas.translate(s.x, s.y);
