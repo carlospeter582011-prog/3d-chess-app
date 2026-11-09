@@ -99,14 +99,14 @@ void main() {
       expect(c.target.y, inInclusiveRange(0, 3));
     });
 
-    test('reset without animation lands on the fit distance, 52 degrees, White\'s side', () {
+    test('reset without animation lands on the fit distance, 43 degrees, White\'s side', () {
       final c = OrbitCamera()..animations = false;
       c.setViewport(400, 800);
       c.rotateByPixels(300, 200);
       c.update(0.1);
       c.reset(animate: false);
       expect(c.radius, closeTo(c.fitDistance(), 1e-9));
-      expect(c.phi, closeTo(degToRad(52), 1e-9));
+      expect(c.phi, closeTo(degToRad(43), 1e-9));
       expect(math.cos(c.theta), closeTo(1, 1e-9));
       expect(c.target.y, 0.4);
     });
