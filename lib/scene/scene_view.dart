@@ -241,7 +241,7 @@ class LabelsPainter extends CustomPainter {
   static List<({String text, V3 pos})> labelPositions() {
     final out = <({String text, V3 pos})>[];
     // Keep coordinates on the wooden rim instead of floating over the pieces.
-    const y = surfaceY - 0.075;
+    const y = surfaceY + 0.008;
     for (var i = 0; i < 8; i++) {
       final letter = String.fromCharCode(97 + i);
       out.add((text: letter, pos: V3(i - 3.5, y, 4.3)));
@@ -265,7 +265,7 @@ class LabelsPainter extends CustomPainter {
       if (s == null) continue;
       final depth = (l.pos - eye).dot(fwd);
       final pxPerUnit = h / (2 * tanHalf * depth);
-      final scale = pxPerUnit * 0.25 / _fontSize;
+      final scale = pxPerUnit * 0.17 / _fontSize;
       final tp = _tp(l.text);
       canvas.save();
       canvas.translate(s.x, s.y);
