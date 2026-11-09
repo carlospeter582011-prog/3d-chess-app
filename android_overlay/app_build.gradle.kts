@@ -17,8 +17,8 @@ android {
 
     defaultConfig {
         applicationId = "__PKG__"
-        minSdk = 26          // Filament needs OpenGL ES 3.0; Stockfish plugin needs 21+
-        targetSdk = 34
+        minSdk = 23          // Android 6.0; device must support OpenGL ES 3.0 and arm64
+        targetSdk = 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         ndk { abiFilters += listOf("arm64-v8a") }   // nearly all current phones; add "armeabi-v7a" / "x86_64" if you need them
