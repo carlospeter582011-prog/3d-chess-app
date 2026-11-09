@@ -31,6 +31,7 @@ Future<void> main() async {
       store: store,
       sfx: sfx,
       autoQuality: await detectDeviceQuality(),
+      showIntro: true,
     ),
   ));
 }

@@ -32,8 +32,10 @@ class AdGate {
 /// Google Mobile Ads with the official Google SAMPLE (test) ad units. Replace them with production IDs only when
 /// they are provided; never click your own production ads.
 ///
-/// * App Open: shown on a cold start and when returning from the background, but never while a game is in progress
-///   ([canShowAppOpen]) and never on top of another full-screen ad.
+/// * App Open: shown ONLY (a) on the intro screen at launch, where the app waits for it with a time limit
+///   ([showColdStartAd]); an ad that loads after that is never shown at launch, so it can't pop up once the player
+///   has started using the app (accidental clicks); and (b) when returning from the background, but never while a
+///   game is in progress ([canShowAppOpen]) and never on top of another full-screen ad.
 /// * Interstitial: only after a game has ended ([onGameFinished]).
 /// * Both are preloaded; load failures (offline, no fill) are ignored so chess stays fully playable offline.
 class AdsService {
@@ -52,10 +54,18 @@ class AdsService {
   bool _initialized = false;
   bool _loadingOpen = false;
   bool _loadingInterstitial = false;
-  bool _coldStart = true;
   bool _disposed = false;
+  Future<void>? _initFuture;
+  final Completer<void> _firstOpenAttempt = Completer<void>();
 
-  Future<void> initialize() async {
+  void _openAttemptDone() {
+    if (!_firstOpenAttempt.isCompleted) _firstOpenAttempt.complete();
+  }
+
+  /// Initialises the SDK once and starts preloading both ads. Safe to call several times.
+  Future<void> initialize() => _initFuture ??= _initialize();
+
+  Future<void> _initialize() async {
     try {
       await MobileAds.instance.initialize();
       if (_disposed) return;
@@ -64,7 +74,30 @@ class AdsService {
       _loadInterstitial();
     } catch (_) {
       // Offline chess must always remain playable.
+      _openAttemptDone();
     }
+  }
+
+  /// Intro-screen flow: waits (at most [timeout]) for the SDK and the App Open ad, shows it if it is ready in time and
+  /// completes when it is closed. Completes immediately when offline or when the ad fails to load or is late. A late ad
+  /// stays cached for the next return from the background; it is never shown over the menu or a game.
+  Future<void> showColdStartAd({Duration timeout = const Duration(seconds: 5)}) async {
+    final stopwatch = Stopwatch()..start();
+    try {
+      await initialize().timeout(timeout);
+      if (!_initialized || _disposed) return;
+      if (_open == null) {
+        final left = timeout - stopwatch.elapsed;
+        if (left <= Duration.zero) return;
+        await _firstOpenAttempt.future.timeout(left);
+      }
+    } on TimeoutException {
+      return;
+    } catch (_) {
+      return;
+    }
+    if (_disposed) return;
+    await _showOpen(duringIntro: true);
   }
 
   bool get _openAllowed => canShowAppOpen?.call() ?? true;
@@ -84,13 +117,11 @@ class AdsService {
           }
           _open = ad;
           _openLoadedAt = DateTime.now();
-          if (_coldStart) {
-            _coldStart = false;
-            _showOpen(); // the first App Open ad of this launch
-          }
+          _openAttemptDone();
         },
         onAdFailedToLoad: (_) {
           _loadingOpen = false;
+          _openAttemptDone();
         },
       ),
     );
@@ -118,41 +149,45 @@ class AdsService {
     );
   }
 
-  void _showOpen() {
+  /// Shows the cached App Open ad. Completes when it has been closed (or immediately when it is not shown).
+  Future<void> _showOpen({bool duringIntro = false}) {
     final ad = _open;
     final loadedAt = _openLoadedAt;
     if (ad == null || loadedAt == null) {
       _loadOpen();
-      return;
+      return Future<void>.value();
     }
     final now = DateTime.now();
     if (AdGate.appOpenExpired(loadedAt, now)) {
       ad.dispose();
       _open = null;
       _loadOpen();
-      return;
+      return Future<void>.value();
     }
-    if (!_gate.allows(now) || !_openAllowed) return;
+    if (!_gate.allows(now) || (!duringIntro && !_openAllowed)) return Future<void>.value();
     _open = null;
     _gate.markShown(now);
+    final closed = Completer<void>();
     ad.fullScreenContentCallback = FullScreenContentCallback<AppOpenAd>(
       onAdDismissedFullScreenContent: (ad) {
         ad.dispose();
         _gate.markDismissed();
         _loadOpen();
+        if (!closed.isCompleted) closed.complete();
       },
       onAdFailedToShowFullScreenContent: (ad, _) {
         ad.dispose();
         _gate.markDismissed();
         _loadOpen();
+        if (!closed.isCompleted) closed.complete();
       },
     );
     ad.show();
+    return closed.future;
   }
 
   /// Call when the app returns to the foreground.
   void onResume() {
-    _coldStart = false;
     if (_open == null) {
       _loadOpen();
       return;
