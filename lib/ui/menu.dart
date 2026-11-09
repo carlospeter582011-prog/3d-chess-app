@@ -126,7 +126,7 @@ class MenuScreen extends StatelessWidget {
                     const Text('Stockfish runs on your device. Elo is approximate.', style: TextStyle(color: C.muted, fontSize: 12.5)),
                   ] else
                     const Text(
-                      'Pass the phone or tablet back and forth — no internet needed. Turn on “Auto-turn view” in settings to spin the board to the player whose turn it is.',
+                      'Pass the phone or tablet back and forth — no internet needed. Turn on “Auto-flip board” in settings to turn the view 180° to the player whose turn it is.',
                       style: TextStyle(color: C.muted, fontSize: 14, height: 1.4),
                     ),
                   const SizedBox(height: 16),

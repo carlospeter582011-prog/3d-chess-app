@@ -71,14 +71,52 @@ class OrbitCamera {
   /// 'w' when looking from White's side of the board (+Z), 'b' from Black's side.
   bool get fromWhiteSide => math.cos(theta) >= 0;
 
-  /// Distance at which the whole board plus its frame is visible.
-  double fitDistance() {
-    final vfov = degToRad(fov);
-    final hfov = 2 * math.atan(math.tan(vfov / 2) * aspect);
-    const need = 11.4; // world width/height we want visible around the board (frame + margin)
-    final dH = need / 2 / math.tan(hfov / 2);
-    final dV = (need * 0.82) / 2 / math.tan(vfov / 2);
-    return math.max(dH, dV);
+  /// Default tilt (from vertical) of the reset view: a little higher than the old 52 degrees so pawns hide less.
+  static final double defaultPhi = degToRad(43);
+
+  /// Points that must stay on screen: the wooden frame (outer half-size ~4.75, y 0..0.5) and the tops of the tallest
+  /// pieces on the four corner squares.
+  static const List<V3> _fitPoints = [
+    V3(-4.75, 0, -4.75), V3(4.75, 0, -4.75), V3(-4.75, 0, 4.75), V3(4.75, 0, 4.75),
+    V3(-4.75, 0.5, -4.75), V3(4.75, 0.5, -4.75), V3(-4.75, 0.5, 4.75), V3(4.75, 0.5, 4.75),
+    V3(-3.5, 2.0, -3.5), V3(3.5, 2.0, -3.5), V3(-3.5, 2.0, 3.5), V3(3.5, 2.0, 3.5),
+  ];
+
+  /// Fraction of the half-width / half-height of the view the board may use (the rest is margin for the HUD).
+  static const double fitX = 0.94, fitY = 0.80;
+
+  /// Smallest camera distance at which every fit point projects inside the view, for the current field of view and
+  /// aspect ratio, seen from tilt [phi] around [tgt]. Works for any screen shape because it uses the real projection
+  /// (the near edge of the board is wider on screen than the far one) instead of a flat width estimate. The result is
+  /// the same from both sides of the board.
+  double fitDistance({double? phi, V3 tgt = const V3(0, 0.4, 0)}) {
+    final p = phi ?? defaultPhi;
+    final th = math.tan(degToRad(fov) / 2);
+    bool fits(double r) {
+      final off = V3(0, r * math.cos(p), r * math.sin(p));
+      final f = (off * -1.0).normalized;
+      final right = f.cross(V3.up).normalized;
+      final up = right.cross(f);
+      for (final q in _fitPoints) {
+        final v = q - (tgt + off);
+        final z = v.dot(f);
+        if (z <= 0.01) return false;
+        if (v.dot(right).abs() / (z * th * aspect) > fitX) return false;
+        if (v.dot(up).abs() / (z * th) > fitY) return false;
+      }
+      return true;
+    }
+
+    var lo = 3.0, hi = 80.0;
+    for (var i = 0; i < 48; i++) {
+      final mid = (lo + hi) / 2;
+      if (fits(mid)) {
+        hi = mid;
+      } else {
+        lo = mid;
+      }
+    }
+    return hi;
   }
 
   /// Sets the viewport shape. Keeps the whole board visible after a rotation / resize.
@@ -152,7 +190,7 @@ class OrbitCamera {
 
   /// side: true = look from White's side (+Z), false = Black's side (-Z).
   void reset({bool animate = true, bool whiteSide = true, bool top = false}) {
-    flyTo(fitDistance(), top ? 0.02 : degToRad(43), whiteSide ? 0 : math.pi, const V3(0, 0.4, 0), animate: animate);
+    flyTo(fitDistance(phi: top ? 0.02 : defaultPhi), top ? 0.02 : defaultPhi, whiteSide ? 0 : math.pi, const V3(0, 0.4, 0), animate: animate);
   }
 
   /// Flips the view to the other side of the board.

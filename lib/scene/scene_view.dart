@@ -1,18 +1,15 @@
 // The 3D board widget: shows the native Filament texture, turns touches into camera moves / taps, drives the
-// per-frame update (tweens, camera damping) and draws the a-h / 1-8 coordinate labels on top.
+// per-frame update (tweens, camera damping). The a-h / 1-8 coordinates are real quads on the board frame inside the
+// native scene (labels.glb), not a Flutter overlay.
 
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import 'board_model.dart';
-import 'board_scene.dart';
-import 'math3.dart';
 import 'scene_renderer.dart';
 
 class SceneView extends StatefulWidget {
@@ -48,6 +45,7 @@ class _SceneViewState extends State<SceneView> with SingleTickerProviderStateMix
   bool _ready = false;
   int _texW = 0, _texH = 0;
   final ValueNotifier<int> _frame = ValueNotifier<int>(0);
+  bool _labelsSent = true; // the native scene starts with the labels shown
 
   // pointer tracking
   final Map<int, Offset> _pointers = {};
@@ -90,6 +88,11 @@ class _SceneViewState extends State<SceneView> with SingleTickerProviderStateMix
   void _onTick(Duration elapsed) {
     final dt = (elapsed - _last).inMicroseconds / 1e6;
     _last = elapsed;
+    if (_ready && _labelsSent != widget.model.labelsVisible) {
+      _labelsSent = widget.model.labelsVisible;
+      unawaited(widget.renderer.setLabels(_labelsSent));
+      widget.model.requestRender();
+    }
     final changed = widget.model.tick(dt);
     if (changed) {
       _frame.value++;
@@ -207,84 +210,8 @@ class _SceneViewState extends State<SceneView> with SingleTickerProviderStateMix
         child: Stack(fit: StackFit.expand, children: [
           const ColoredBox(color: Color(0xFF15110E)),
           if (_textureId != null) Texture(textureId: _textureId!, filterQuality: FilterQuality.medium),
-          if (_ready)
-            IgnorePointer(
-              child: RepaintBoundary(
-                child: CustomPaint(painter: LabelsPainter(widget.model, _frame)),
-              ),
-            ),
         ]),
       );
     });
   }
-}
-
-/// a-h and 1-8 around the board, drawn from the projected 3D positions so they follow the camera.
-class LabelsPainter extends CustomPainter {
-  LabelsPainter(this.model, Listenable repaint) : super(repaint: repaint);
-  final BoardModel model;
-
-  static const double _fontSize = 36;
-  static final Map<String, TextPainter> _cache = {};
-
-  static TextPainter _tp(String text) => _cache.putIfAbsent(text, () {
-        final tp = TextPainter(
-          text: TextSpan(
-            text: text,
-            style: const TextStyle(fontSize: _fontSize, fontWeight: FontWeight.w600, color: Color(0xD9F0DEBE)),
-          ),
-          textDirection: ui.TextDirection.ltr,
-        )..layout();
-        return tp;
-      });
-
-  /// World positions and texts of the 32 labels (testable).
-  static List<({String text, V3 pos})> labelPositions() {
-    final out = <({String text, V3 pos})>[];
-    // Keep coordinates on the wooden rim instead of floating over the pieces.
-    const y = surfaceY + 0.008;
-    for (var i = 0; i < 8; i++) {
-      final letter = String.fromCharCode(97 + i);
-      out.add((text: letter, pos: V3(i - 3.5, y, 4.3)));
-      out.add((text: letter, pos: V3(i - 3.5, y, -4.3)));
-      out.add((text: '${i + 1}', pos: V3(-4.3, y, 3.5 - i)));
-      out.add((text: '${i + 1}', pos: V3(4.3, y, 3.5 - i)));
-    }
-    return out;
-  }
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (!model.labelsVisible) return;
-    final cam = model.camera;
-    final w = size.width, h = size.height;
-    // Project the board's X and Z axes too. Unlike screen-facing text, this
-    // affine transform makes every label lie in the board plane as the camera
-    // orbits, pans and zooms (similar to the web board's texture labels).
-    const worldLetterSize = 0.24;
-    final unit = worldLetterSize / _fontSize;
-    for (final l in labelPositions()) {
-      final p = cam.project(l.pos, w, h);
-      final px = cam.project(l.pos + const V3(1, 0, 0), w, h);
-      final pz = cam.project(l.pos + const V3(0, 0, 1), w, h);
-      if (p == null || px == null || pz == null) continue;
-      final dx = (px.x - p.x) * unit;
-      final dy = (px.y - p.y) * unit;
-      final zx = (pz.x - p.x) * unit;
-      final zy = (pz.y - p.y) * unit;
-      final tp = _tp(l.text);
-      canvas.save();
-      canvas.transform(Float64List.fromList([
-        dx, dy, 0, 0,
-        zx, zy, 0, 0,
-        0, 0, 1, 0,
-        p.x, p.y, 0, 1,
-      ]));
-      tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
-      canvas.restore();
-    }
-  }
-
-  @override
-  bool shouldRepaint(LabelsPainter old) => true;
 }

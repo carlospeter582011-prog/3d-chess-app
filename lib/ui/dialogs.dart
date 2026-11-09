@@ -135,7 +135,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
               const SizedBox(height: 10),
               _toggle(const Key('set-sound'), 'Sound effects', null, s.sound, (v) => _set(s.copyWith(sound: v))),
               _toggle(const Key('set-labels'), 'Board coordinates', 'a–h and 1–8 around the board', s.labels, (v) => _set(s.copyWith(labels: v))),
-              _toggle(const Key('set-flip'), 'Auto-turn view (2 players)', 'Rotates the camera to whoever moves next', s.autoFlip,
+              _toggle(const Key('set-flip'), 'Auto-flip board (2 players)', 'Turns the view 180° after every move, keeping zoom and tilt', s.autoFlip,
                   (v) => _set(s.copyWith(autoFlip: v))),
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),

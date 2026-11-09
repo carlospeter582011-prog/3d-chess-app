@@ -524,7 +524,7 @@ void main() {
     });
   });
 
-  group('2 player auto-turn view', () {
+  group('2 player auto-flip board', () {
     test('the camera follows whoever moves next', () async {
       final r = Rig();
       r.game.autoFlip = true;

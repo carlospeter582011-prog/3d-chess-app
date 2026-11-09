@@ -90,6 +90,9 @@ class FilamentScene(
     private val markerVisible = Array(MARKER_NAMES.size) { BooleanArray(MARKER_POOL[it]) }
     private val markerUsed = Array(MARKER_NAMES.size) { BooleanArray(MARKER_POOL[it]) }
     private val assets = ArrayList<FilamentAsset>()
+    private var labelsAsset: FilamentAsset? = null
+    private var labelsOn = true
+    private var labelsShown = false
 
     private var frame: FloatArray? = null
     private var dirty = true
@@ -178,6 +181,7 @@ class FilamentScene(
     fun startLoading() {
         tasks.add("table" to { loadStatic("table", castShadows = false) })
         tasks.add("board" to { loadStatic("board", castShadows = false) })
+        tasks.add("labels" to { loadLabels() })
         for (t in PIECE_NAMES.indices) {
             for (c in 0..1) {
                 val file = PIECE_NAMES[t] + if (c == 0) "_light" else "_dark"
@@ -225,6 +229,36 @@ class FilamentScene(
         setShadowFlags(asset, castShadows, true)
         scene.addEntities(asset.entities)
         assets.add(asset)
+    }
+
+    /**
+     * The a-h / 1-8 coordinates: real quads lying on the board frame (labels.glb, same layout as the web version),
+     * so they follow the board's perspective exactly and never face the camera.
+     */
+    private fun loadLabels() {
+        val asset = assetLoader.createAsset(readModel("labels")) ?: throw IllegalStateException("bad glTF labels")
+        resourceLoader.loadResources(asset)
+        asset.releaseSourceData()
+        setShadowFlags(asset, false, false)
+        assets.add(asset)
+        labelsAsset = asset
+        applyLabels()
+    }
+
+    private fun applyLabels() {
+        val a = labelsAsset ?: return
+        if (labelsOn && !labelsShown) {
+            scene.addEntities(a.entities)
+        } else if (!labelsOn && labelsShown) {
+            scene.removeEntities(a.entities)
+        }
+        labelsShown = labelsOn
+        dirty = true
+    }
+
+    fun setLabels(on: Boolean) {
+        labelsOn = on
+        applyLabels()
     }
 
     private fun loadPieces(file: String, type: Int, color: Int) {
