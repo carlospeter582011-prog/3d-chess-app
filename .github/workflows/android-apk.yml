@@ -91,7 +91,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Publish APK and AAB to GitHub Releases
-        if: success() && github.event_name == 'push'
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -106,5 +106,5 @@ jobs:
             dist/chess3d-release.aab \
             --title "3D Chess Android $TAG" \
             --target "${{ github.sha }}" \
-            --prerelease \
+            --latest \
             --notes "Commit ${{ github.sha }}. $SIGN AdMob TEST IDs only. Android 6.0+ (API 23), arm64-v8a, OpenGL ES 3.0. Analyze and unit/widget tests passed in CI; not yet verified on a physical device."
