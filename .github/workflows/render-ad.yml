@@ -1,0 +1,43 @@
+# Renders the promo video (ad-video/, Remotion) in both formats and attaches the MP4s to a pre-release.
+# Run it from the Actions tab ("Render ad video") after editing ad-video/src.
+name: Render ad video
+
+on:
+  workflow_dispatch:
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: ad-video
+    env:
+      CHROME_BIN: /usr/bin/google-chrome
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ad-video/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npx tsc --noEmit
+      - run: npm run prepare-assets
+      - name: Render landscape (16:9)
+        run: npx remotion render src/index.ts AdLandscape out/chess3d-ad-landscape.mp4 --concurrency=$(nproc) --timeout=180000
+      - name: Render vertical (9:16)
+        run: npx remotion render src/index.ts AdVertical out/chess3d-ad-vertical.mp4 --concurrency=$(nproc) --timeout=180000
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chess3d-ad
+          path: ad-video/out/*.mp4
+      - name: Publish to a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "ad-video-${{ github.run_number }}" out/chess3d-ad-landscape.mp4 out/chess3d-ad-vertical.mp4 \
+            --title "3D Chess promo video #${{ github.run_number }}" --prerelease --target "${{ github.sha }}" \
+            --notes "Rendered from ad-video/ by the Render ad video workflow. Source: commit ${{ github.sha }}."
