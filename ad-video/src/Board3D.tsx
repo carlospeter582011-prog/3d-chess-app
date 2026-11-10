@@ -75,7 +75,7 @@ const Inner: React.FC<{ scene: Scene | null; frame: number; cam: CameraSpec; wid
   const hHalf = Math.atan(Math.tan((fov * Math.PI) / 360) * aspect);
   const vHalf = (fov * Math.PI) / 360;
   // fit the board to both the width and the height of the frame
-  const dist = Math.max(6.4 / Math.tan(hHalf), 6.2 / Math.tan(vHalf)) * cam.zoom;
+  const dist = Math.max((aspect < 1 ? 5.7 : 6.4) / Math.tan(hHalf), 5.5 / Math.tan(vHalf)) * cam.zoom;
   const phi = (cam.phi * Math.PI) / 180;
   const cx = Math.sin(cam.theta) * Math.sin(phi) * dist;
   const cz = Math.cos(cam.theta) * Math.sin(phi) * dist;
