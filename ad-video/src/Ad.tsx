@@ -14,7 +14,7 @@ const fade = (frame: number, total: number, edge = 10) =>
 
 const useCam = (portrait: boolean) => (base: number, sway: number, total: number) => (f: number): CameraSpec => ({
   theta: base * (portrait ? 0.5 : 1) + Math.sin((f / total) * Math.PI * 2) * sway * (portrait ? 0.45 : 1),
-  phi: portrait ? 44 : 56,
+  phi: portrait ? 44 : 52,
   zoom: portrait ? 1.0 : 1.0,
 });
 
@@ -55,7 +55,7 @@ const Intro: React.FC = () => {
   });
   return (
     <AbsoluteFill style={{ opacity: fade(frame, INTRO) }}>
-      <Board3D scene={null} cam={(f) => ({ theta: -0.5 + (f / INTRO) * 0.9, phi: portrait ? 44 : 56, zoom: 1.0 })} />
+      <Board3D scene={null} cam={(f) => ({ theta: -0.5 + (f / INTRO) * 0.9, phi: portrait ? 44 : 52, zoom: 1.0 })} />
       <AbsoluteFill style={{ background: 'radial-gradient(ellipse at center, rgba(15,11,8,0.82) 0%, rgba(15,11,8,0.72) 55%, rgba(15,11,8,0.5) 100%)' }} />
       <AbsoluteFill style={{ alignItems: 'center', justifyContent: 'center', fontFamily: FONT, color: '#fff', textAlign: 'center', padding: u * 0.06 }}>
         <div style={{ transform: `scale(${pop})` }}><Logo size={u * (portrait ? 0.34 : 0.3)} /></div>
