@@ -190,7 +190,10 @@ class _CtrlButton extends StatelessWidget {
               decoration: BoxDecoration(color: C.panel, borderRadius: BorderRadius.circular(12), border: Border.all(color: on ? C.gold : C.line)),
               child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                 Text(icon, style: TextStyle(fontSize: compact ? 16 : 19, height: 1, color: on ? C.gold2 : C.text, fontWeight: FontWeight.bold)),
-                Text(label, style: TextStyle(fontSize: compact ? 10 : 11, color: C.muted)),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  child: FittedBox(fit: BoxFit.scaleDown, child: Text(label, maxLines: 1, style: TextStyle(fontSize: compact ? 10 : 11, color: C.muted))),
+                ),
               ]),
             ),
           ),
