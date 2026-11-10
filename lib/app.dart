@@ -80,8 +80,8 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
   String? error;
   int attempt = 0;
   bool showResult = false;
+  bool _resultHandled = false;
   bool _wasActive = false;
-  GameStatus _lastStatus = GameStatus.playing;
   final math.Random _rnd = math.Random();
   late final AdsService _ads = AdsService(
     // an App Open ad must never cover a game in progress
@@ -142,12 +142,16 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     final s = game.snapshot;
     // result card when a game ends; attract-mode rotation only while the menu is up
     final over = s.status != GameStatus.playing && s.active;
-    if (over && (_lastStatus == GameStatus.playing || !_wasActive)) {
+    // the card waits until the board is idle, so the checkmate animation (king thrown off) plays first
+    if (over && !s.busy && !_resultHandled) {
+      _resultHandled = true;
       showResult = true;
       _ads.onGameFinished();
     }
-    if (!over) showResult = false;
-    _lastStatus = s.status;
+    if (!over) {
+      showResult = false;
+      _resultHandled = false;
+    }
     if (s.active != _wasActive) {
       _wasActive = s.active;
       d.model.setAutoRotate(!s.active);

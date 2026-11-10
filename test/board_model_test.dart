@@ -183,6 +183,37 @@ void main() {
       expect(m.snapshot().toSet(), chess.pieces().toSet());
     });
 
+    test('checkmate: the losing king is thrown off the board, the winner is untouched, and it takes about 1.4 s', () async {
+      final m = BoardModel()..animations = true;
+      m.setPosition([pp('e1', Side.w, PT.k), pp('e8', Side.b, PT.k), pp('a1', Side.w, PT.r)]);
+      final king = m.pieceOn('e8')!;
+      var peak = 0.0;
+      var done = false;
+      m.knockOverKing(Side.b).then((_) => done = true);
+      var t = 0.0;
+      while (!done && t < 5) {
+        m.tick(1 / 60);
+        t += 1 / 60;
+        peak = math.max(peak, king.pos.y);
+        await pumpEventQueue();
+      }
+      expect(done, isTrue);
+      expect(t, closeTo(1.37, 0.1));
+      expect(peak, greaterThan(surfaceY + 1.0)); // it flies up
+      expect(worldToSq(king.pos.x, king.pos.z), isNull); // and lands off the board
+      expect(m.pieceOn('e1')!.scale, 1);
+      expect(m.pieceOn('e1')!.pos.y, surfaceY);
+    });
+
+    test('knockOverKing is instant with animations off and ignores a missing king', () async {
+      final m = start();
+      await m.knockOverKing(Side.w);
+      expect(m.snapshot().toSet(), Chess().pieces().toSet());
+      final empty = BoardModel()..animations = true;
+      empty.setPosition([pp('a1', Side.w, PT.r)]);
+      await empty.knockOverKing(Side.b);
+    });
+
     test('replacing the position while a move is animating is safe', () async {
       final m = start(animated: true);
       var done = false;

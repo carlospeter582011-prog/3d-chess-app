@@ -208,6 +208,48 @@ class BoardModel implements BoardScene {
     dirty = true;
   }
 
+  /// Checkmate effect. The supplied king models are single solid meshes, so instead of breaking apart the losing king
+  /// shudders, tips over and is flung off the board, tumbling, and shrinks away at the end.
+  @override
+  Future<void> knockOverKing(Side loser) async {
+    if (!animations) return;
+    PieceObj? king;
+    for (final p in _all) {
+      if (p.type == PT.k && p.side == loser) king = p;
+    }
+    if (king == null) return;
+    final k = king;
+    final gen = _generation;
+    unlift();
+    final start = k.pos;
+    // fly away from the board centre; a king on the centre line goes sideways towards the nearer long edge
+    var dx = start.x, dz = start.z;
+    final len = math.sqrt(dx * dx + dz * dz);
+    if (len < 0.5) {
+      dx = 1;
+      dz = 0;
+    } else {
+      dx /= len;
+      dz /= len;
+    }
+    // 1) shudder
+    await _tween(420, (t) {
+      final amp = 0.07 * math.sin(t * math.pi * 7) * (0.4 + t);
+      k.rotZ = amp;
+      k.pos = V3(start.x + dx * 0.02 * math.sin(t * math.pi * 11), start.y, start.z);
+    });
+    if (gen != _generation) return;
+    // 2) thrown
+    const dist = 4.2, apex = 1.9;
+    await _tween(950, (t) {
+      final e = t;
+      k.pos = V3(start.x + dx * dist * e, start.y + 4 * apex * e * (1 - e) + 0.3 * e, start.z + dz * dist * e);
+      k.rotZ = e * math.pi * 2.6;
+      k.scale = t < 0.75 ? 1 : math.max(0.0001, 1 - (t - 0.75) / 0.25);
+    });
+    dirty = true;
+  }
+
   // ------------------------------------------------------------------ selection feedback
   @override
   void lift(String sq) {

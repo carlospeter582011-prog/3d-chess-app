@@ -386,7 +386,7 @@ void main() {
       expect(r.s.status, GameStatus.checkmate);
       expect(r.s.winner, Side.b);
       expect(r.s.check, isTrue);
-      expect(r.sfx.played.last, 'end');
+      expect(r.sfx.played.last, 'checkmate');
       r.game.tap('a2');
       expect(r.s.selected, isNull);
     });
@@ -610,6 +610,34 @@ void main() {
       r.game.applySettings(const Settings(sound: false, labels: false, autoFlip: true));
       expect(r.board.labelsVisible, isFalse);
       expect(r.game.autoFlip, isTrue);
+    });
+  });
+
+  group('end-of-game sounds', () {
+    test('checkmate plays the checkmate jingle (not the generic end sound)', () async {
+      final r = Rig();
+      r.game.start(local);
+      await r.play('f2', 'f3');
+      await r.play('e7', 'e5');
+      await r.play('g2', 'g4');
+      await r.play('d8', 'h4');
+      expect(r.s.status, GameStatus.checkmate);
+      expect(r.s.winner, Side.b);
+      expect(r.sfx.played, contains('checkmate'));
+      expect(r.sfx.played, isNot(contains('end')));
+    });
+
+    test('stalemate plays the stalemate jingle; resigning keeps the generic end sound', () async {
+      final r = Rig();
+      r.game.start(local);
+      r.game.debugLoadFen('k7/8/1K6/8/8/8/8/2Q5 w - - 0 1');
+      await r.play('c1', 'c7');
+      expect(r.s.status, GameStatus.stalemate);
+      expect(r.sfx.played, contains('stalemate'));
+      final r2 = Rig();
+      r2.game.start(local);
+      r2.game.resign();
+      expect(r2.sfx.played, ['end']);
     });
   });
 }

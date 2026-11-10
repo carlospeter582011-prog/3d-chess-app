@@ -28,6 +28,8 @@ abstract class Sfx {
   void capture();
   void check();
   void end();
+  void checkmate();
+  void stalemate();
 }
 
 class SilentSfx implements Sfx {
@@ -42,4 +44,8 @@ class SilentSfx implements Sfx {
   void check() => played.add('check');
   @override
   void end() => played.add('end');
+  @override
+  void checkmate() => played.add('checkmate');
+  @override
+  void stalemate() => played.add('stalemate');
 }

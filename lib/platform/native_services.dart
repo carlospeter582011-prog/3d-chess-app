@@ -76,6 +76,7 @@ Future<Uint8List?> _bundledSound(String name) async {
 class ChannelSfx implements Sfx {
   bool _muted = false;
   bool _loaded = false;
+  final Set<String> _recorded = {};
 
   /// Generates the sounds and gives them to the native SoundPool.
   Future<void> init() async {
@@ -83,6 +84,13 @@ class ChannelSfx implements Sfx {
       for (final name in soundNames) {
         final bytes = await _bundledSound(name) ?? toWav(synthesize(name));
         await _services.invokeMethod<void>('sfxLoad', {'name': name, 'wav': bytes});
+      }
+      // Recorded jingles for the end of a game (assets/sfx/checkmate.mp3, stalemate.mp3); no synthesized fallback.
+      for (final name in const ['checkmate', 'stalemate']) {
+        final bytes = await _bundledSound(name);
+        if (bytes == null) continue;
+        await _services.invokeMethod<void>('sfxLoad', {'name': name, 'wav': bytes});
+        _recorded.add(name);
       }
       _loaded = true;
     } catch (e) {
@@ -105,4 +113,8 @@ class ChannelSfx implements Sfx {
   void check() => _play('check');
   @override
   void end() => _play('end');
+  @override
+  void checkmate() => _play(_recorded.contains('checkmate') ? 'checkmate' : 'end');
+  @override
+  void stalemate() => _play(_recorded.contains('stalemate') ? 'stalemate' : 'end');
 }
