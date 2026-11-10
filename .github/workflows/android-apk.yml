@@ -8,6 +8,8 @@ on:
     branches:
       - feature/board-camera-admob-enhancements
       - main
+    paths-ignore:
+      - 'ad-video/**'
   pull_request:
     paths:
       - 'lib/**'
