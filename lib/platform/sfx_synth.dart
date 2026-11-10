@@ -1,10 +1,12 @@
-// Synthesised wood-click sounds (a port of sound.ts). The samples are generated in Dart, wrapped as 16-bit WAV
-// and handed to Android's SoundPool, so the app ships no audio files.
+// Synthesised sounds. Piece moves and captures use a small physical model of a wooden piece knocking on a wooden board
+// (several damped resonances, a short "tap" transient and a low body "thock"); check and end are soft bell tones.
+// The samples are generated in Dart, wrapped as 16-bit WAV and handed to Android's SoundPool. A recorded file dropped
+// into assets/sfx/<name>.wav|ogg|mp3 replaces the synthesised sound of that name (see assets/sfx/README.md).
 
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-const int sampleRate = 22050;
+const int sampleRate = 44100;
 
 /// One click: noise + sine with a fast decay, through a band-pass filter at 1.6x the pitch (Q 0.9).
 Float64List _click(double freq, double dur, double gain, double noise, math.Random rnd) {
@@ -34,15 +36,44 @@ Float64List _click(double freq, double dur, double gain, double noise, math.Rand
   return out;
 }
 
+/// A wooden piece knocking on a wooden board. [bright] (0..1.2) is how hard / sharp the hit is.
+Float64List _knock(double freq, double dur, double gain, double bright, math.Random rnd) {
+  final len = (sampleRate * dur).floor();
+  final out = Float64List(len);
+  const ratios = [1.0, 2.32, 3.87, 5.41]; // inharmonic partials of a small block of wood
+  const amps = [1.0, 0.55, 0.3, 0.16];
+  const taus = [0.045, 0.028, 0.017, 0.010]; // seconds: higher partials die first
+  final phase = [for (var k = 0; k < 4; k++) rnd.nextDouble() * 0.6];
+  var lp = 0.0;
+  for (var i = 0; i < len; i++) {
+    final t = i / sampleRate;
+    var v = 0.0;
+    for (var k = 0; k < 4; k++) {
+      v += amps[k] * (k == 0 ? 1.0 : bright) * math.exp(-t / taus[k]) * math.sin(2 * math.pi * freq * ratios[k] * t + phase[k]);
+    }
+    // low board "thock"
+    v += 0.8 * math.exp(-t / 0.035) * math.sin(2 * math.pi * freq * 0.42 * t);
+    // 3 ms tap transient: low-passed noise
+    lp += 0.35 * ((rnd.nextDouble() * 2 - 1) - lp);
+    v += 1.1 * bright * lp * math.exp(-t / 0.0014);
+    final attack = math.min(1.0, t / 0.0003); // 0.3 ms ramp, no click
+    out[i] = v * attack * gain * 0.55;
+  }
+  return out;
+}
+
 class _Part {
   final double freq, dur, gain, noise;
   final double offsetMs;
-  const _Part(this.freq, this.dur, this.gain, this.noise, [this.offsetMs = 0]);
+
+  /// True: wooden knock (noise = brightness); false: soft bell tone.
+  final bool knock;
+  const _Part(this.freq, this.dur, this.gain, this.noise, [this.offsetMs = 0, this.knock = false]);
 }
 
 const Map<String, List<_Part>> _recipes = {
-  'move': [_Part(260, 0.12, 0.9, 0.5)],
-  'capture': [_Part(190, 0.16, 1.2, 0.7), _Part(320, 0.08, 0.6, 0.5, 40)],
+  'move': [_Part(470, 0.16, 0.95, 0.8, 0, true)],
+  'capture': [_Part(340, 0.22, 1.15, 1.1, 0, true), _Part(520, 0.13, 0.7, 0.8, 58, true)],
   'check': [_Part(520, 0.18, 0.7, 0.2), _Part(690, 0.22, 0.6, 0.1, 110)],
   'end': [_Part(330, 0.3, 0.7, 0.1), _Part(247, 0.4, 0.7, 0.1, 180)],
 };
@@ -61,14 +92,14 @@ Float64List synthesize(String name, {int seed = 7}) {
   }
   final mix = Float64List(total);
   for (final p in parts) {
-    final c = _click(p.freq, p.dur, p.gain, p.noise, rnd);
+    final c = p.knock ? _knock(p.freq, p.dur, p.gain, p.noise, rnd) : _click(p.freq, p.dur, p.gain, p.noise, rnd);
     final off = (sampleRate * p.offsetMs / 1000).round();
     for (var i = 0; i < c.length; i++) {
       mix[off + i] += c[i];
     }
   }
   for (var i = 0; i < mix.length; i++) {
-    mix[i] = mix[i].clamp(-1.0, 1.0);
+    mix[i] = (mix[i] * 1.2).clamp(-1.4, 1.4) / 1.4; // gentle ceiling, stays within -1..1
   }
   return mix;
 }

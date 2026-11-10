@@ -64,11 +64,12 @@ class _Captured extends StatelessWidget {
 }
 
 class _PlayerCard extends StatelessWidget {
-  const _PlayerCard({required this.s, required this.side, required this.label, this.sub});
+  const _PlayerCard({required this.s, required this.side, required this.label, this.sub, this.compact = false});
   final GameSnapshot s;
   final Side side;
   final String label;
   final String? sub;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -76,8 +77,8 @@ class _PlayerCard extends StatelessWidget {
     final diff = materialBalance(s, side);
     final active = s.status == GameStatus.playing && s.turn == side;
     return Container(
-      constraints: const BoxConstraints(minHeight: 46),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      constraints: BoxConstraints(minHeight: compact ? 36 : 46),
+      padding: EdgeInsets.symmetric(horizontal: 12, vertical: compact ? 4 : 8),
       decoration: BoxDecoration(
         color: C.panel,
         borderRadius: BorderRadius.circular(12),
@@ -110,9 +111,10 @@ class _PlayerCard extends StatelessWidget {
 }
 
 class _MoveList extends StatefulWidget {
-  const _MoveList({required this.history, required this.vertical});
+  const _MoveList({required this.history, required this.vertical, this.compact = false});
   final List<String> history;
   final bool vertical;
+  final bool compact;
   @override
   State<_MoveList> createState() => _MoveListState();
 }
@@ -151,8 +153,8 @@ class _MoveListState extends State<_MoveList> {
     }
     final empty = h.isEmpty;
     return Container(
-      constraints: const BoxConstraints(minHeight: 38),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      constraints: BoxConstraints(minHeight: compact ? 0 : 38),
+      padding: EdgeInsets.symmetric(horizontal: 12, vertical: compact ? 5 : 8),
       decoration: BoxDecoration(color: C.panel, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.line)),
       alignment: Alignment.centerLeft,
       child: empty
@@ -169,8 +171,9 @@ class _MoveListState extends State<_MoveList> {
 }
 
 class _CtrlButton extends StatelessWidget {
-  const _CtrlButton({super.key, required this.icon, required this.label, required this.onPressed, this.on = false});
+  const _CtrlButton({super.key, required this.icon, required this.label, required this.onPressed, this.on = false, this.compact = false});
   final String icon, label;
+  final bool compact;
   final VoidCallback? onPressed;
   final bool on;
 
@@ -183,11 +186,11 @@ class _CtrlButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(12),
             onTap: onPressed,
             child: Ink(
-              height: 54,
+              height: compact ? 42 : 54,
               decoration: BoxDecoration(color: C.panel, borderRadius: BorderRadius.circular(12), border: Border.all(color: on ? C.gold : C.line)),
               child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Text(icon, style: TextStyle(fontSize: 19, height: 1, color: on ? C.gold2 : C.text, fontWeight: FontWeight.bold)),
-                Text(label, style: const TextStyle(fontSize: 11, color: C.muted)),
+                Text(icon, style: TextStyle(fontSize: compact ? 16 : 19, height: 1, color: on ? C.gold2 : C.text, fontWeight: FontWeight.bold)),
+                Text(label, style: TextStyle(fontSize: compact ? 10 : 11, color: C.muted)),
               ]),
             ),
           ),
@@ -274,11 +277,14 @@ class _HudState extends State<Hud> {
     final me = bot ? human : Side.w;
     final st = statusText(s);
     final over = s.status != GameStatus.playing;
+    // Phone held sideways: the side panel is short, so tighten everything instead of overflowing.
+    final compact = widget.wide && MediaQuery.sizeOf(context).height < 470;
+    final gap = compact ? 5.0 : 8.0;
 
     final statusBox = Expanded(
       child: Container(
         key: const Key('status'),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: compact ? 8 : 11),
         decoration: BoxDecoration(
           color: switch (st.tone) { 'check' => const Color(0xE6A0281C), _ => C.panel },
           gradient: st.tone == 'over' ? const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [C.gold2, C.gold]) : null,
@@ -305,22 +311,24 @@ class _HudState extends State<Hud> {
         const SizedBox(width: 8),
         GlassIconButton(icon: '⚙', tooltip: 'Settings', onPressed: widget.onSettings),
       ]),
-      const SizedBox(height: 8),
+      SizedBox(height: gap),
       _PlayerCard(
         s: s,
         side: opp,
         label: bot ? 'Bot · ${s.config.elo}' : opp.label,
         sub: bot ? opp.label : null,
+        compact: compact,
       ),
-      const SizedBox(height: 8),
-      if (widget.wide) Flexible(child: _MoveList(history: s.history, vertical: true)) else _MoveList(history: s.history, vertical: false),
+      SizedBox(height: gap),
+      if (widget.wide) Flexible(child: _MoveList(history: s.history, vertical: true, compact: compact)) else _MoveList(history: s.history, vertical: false),
     ]);
 
     final controls = Row(children: [
       for (final w in <Widget>[
-        _CtrlButton(key: const Key('btn-undo'), icon: '↶', label: 'Undo', onPressed: s.canUndo ? widget.game.undo : null),
-        _CtrlButton(key: const Key('btn-flip'), icon: '⟳', label: 'Flip', onPressed: widget.board.flipView),
+        _CtrlButton(compact: compact, key: const Key('btn-undo'), icon: '↶', label: 'Undo', onPressed: s.canUndo ? widget.game.undo : null),
+        _CtrlButton(compact: compact, key: const Key('btn-flip'), icon: '⟳', label: 'Flip', onPressed: widget.board.flipView),
         _CtrlButton(
+          compact: compact,
           key: const Key('btn-top'),
           icon: '⬒',
           label: 'Top',
@@ -332,6 +340,7 @@ class _HudState extends State<Hud> {
           },
         ),
         _CtrlButton(
+          compact: compact,
           key: const Key('btn-reset'),
           icon: '◎',
           label: 'Reset',
@@ -341,20 +350,20 @@ class _HudState extends State<Hud> {
           },
         ),
         if (over)
-          _CtrlButton(key: const Key('btn-rematch'), icon: '♻', label: 'Rematch', onPressed: () => _confirm(ConfirmKind.rematch))
+          _CtrlButton(compact: compact, key: const Key('btn-rematch'), icon: '♻', label: 'Rematch', onPressed: () => _confirm(ConfirmKind.rematch))
         else if (bot)
-          _CtrlButton(key: const Key('btn-resign'), icon: '⚑', label: 'Resign', onPressed: () => _confirm(ConfirmKind.resign))
+          _CtrlButton(compact: compact, key: const Key('btn-resign'), icon: '⚑', label: 'Resign', onPressed: () => _confirm(ConfirmKind.resign))
         else ...[
-          _CtrlButton(key: const Key('btn-draw'), icon: '½', label: 'Draw', onPressed: () => _confirm(ConfirmKind.draw)),
-          _CtrlButton(key: const Key('btn-resign'), icon: '⚑', label: 'Resign', onPressed: () => _confirm(ConfirmKind.resign)),
+          _CtrlButton(compact: compact, key: const Key('btn-draw'), icon: '½', label: 'Draw', onPressed: () => _confirm(ConfirmKind.draw)),
+          _CtrlButton(compact: compact, key: const Key('btn-resign'), icon: '⚑', label: 'Resign', onPressed: () => _confirm(ConfirmKind.resign)),
         ],
       ])
-        Expanded(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 3), child: w)),
+        Expanded(child: Padding(padding: EdgeInsets.symmetric(horizontal: compact ? 2 : 3), child: w)),
     ]);
 
     final bottom = Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      _PlayerCard(s: s, side: me, label: bot ? 'You' : me.label, sub: bot ? me.label : null),
-      const SizedBox(height: 8),
+      _PlayerCard(s: s, side: me, label: bot ? 'You' : me.label, sub: bot ? me.label : null, compact: compact),
+      SizedBox(height: gap),
       controls,
     ]);
 
@@ -364,11 +373,11 @@ class _HudState extends State<Hud> {
           gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF1C1510), Color(0xFF120D09)]),
           border: Border(left: BorderSide(color: C.line)),
         ),
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(compact ? 8 : 16),
         child: SafeArea(
           child: Column(children: [
             Expanded(child: top),
-            const SizedBox(height: 12),
+            SizedBox(height: compact ? 6 : 12),
             bottom,
           ]),
         ),
