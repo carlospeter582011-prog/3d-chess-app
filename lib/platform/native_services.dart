@@ -2,6 +2,7 @@
 // (SoundPool). Both are tiny, so no extra pub packages are needed.
 
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -61,6 +62,17 @@ Future<Quality> detectDeviceQuality() async {
   }
 }
 
+/// A recorded sound shipped in assets/sfx/<name>.wav|ogg|mp3, if there is one.
+Future<Uint8List?> _bundledSound(String name) async {
+  for (final ext in const ['wav', 'ogg', 'mp3']) {
+    try {
+      final d = await rootBundle.load('assets/sfx/$name.$ext');
+      return d.buffer.asUint8List(d.offsetInBytes, d.lengthInBytes);
+    } catch (_) {}
+  }
+  return null;
+}
+
 class ChannelSfx implements Sfx {
   bool _muted = false;
   bool _loaded = false;
@@ -69,8 +81,8 @@ class ChannelSfx implements Sfx {
   Future<void> init() async {
     try {
       for (final name in soundNames) {
-        final wav = toWav(synthesize(name));
-        await _services.invokeMethod<void>('sfxLoad', {'name': name, 'wav': wav});
+        final bytes = await _bundledSound(name) ?? toWav(synthesize(name));
+        await _services.invokeMethod<void>('sfxLoad', {'name': name, 'wav': bytes});
       }
       _loaded = true;
     } catch (e) {

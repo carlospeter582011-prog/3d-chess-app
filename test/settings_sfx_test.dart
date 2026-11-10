@@ -110,6 +110,31 @@ void main() {
       expect(synthesize('capture').length, greaterThan(synthesize('move').length));
       expect(synthesize('end').length, greaterThan(synthesize('capture').length));
     });
+    test('a move is a sharp knock: loud attack, fully decayed by the end, no DC offset', () {
+      for (final n in ['move', 'capture']) {
+        final s = synthesize(n);
+        double energy(int a, int b) {
+          var e = 0.0;
+          for (var i = a; i < b; i++) {
+            e += s[i] * s[i];
+          }
+          return e;
+        }
+
+        final q = s.length ~/ 4;
+        expect(energy(q * 3, s.length), lessThan(energy(0, q) * 0.02), reason: '$n tail');
+        var peakAt = 0, peak = 0.0, sum = 0.0;
+        for (var i = 0; i < s.length; i++) {
+          sum += s[i];
+          if (s[i].abs() > peak) {
+            peak = s[i].abs();
+            peakAt = i;
+          }
+        }
+        expect(peakAt, lessThan(sampleRate * 0.03), reason: '$n peak should be in the first 30 ms');
+        expect((sum / s.length).abs(), lessThan(0.02), reason: '$n DC offset');
+      }
+    });
     test('unknown sound throws', () {
       expect(() => synthesize('nope'), throwsArgumentError);
     });

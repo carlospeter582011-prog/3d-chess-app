@@ -212,8 +212,10 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     return Scaffold(
       backgroundColor: C.bg,
       body: LayoutBuilder(builder: (context, c) {
-        final wide = c.maxWidth >= 900 && c.maxWidth / c.maxHeight >= 1.25;
-        final panel = (active && wide && ready) ? 340.0 : 0.0;
+        // Any landscape screen (phones included) gets the side panel, so the HUD never covers the board.
+        final wide = c.maxWidth / c.maxHeight >= 1.25;
+        final panelWidth = (c.maxWidth * 0.36).clamp(250.0, 340.0);
+        final panel = (active && wide && ready) ? panelWidth : 0.0;
         return Stack(children: [
           Positioned(
             left: 0,
@@ -249,7 +251,7 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
                     right: 0,
                     top: 0,
                     bottom: 0,
-                    width: 340,
+                    width: panelWidth,
                     child: Hud(game: game, snapshot: snap, board: d.model, onMenu: game.leave, onSettings: _openSettings, wide: true),
                   )
                 : Positioned.fill(

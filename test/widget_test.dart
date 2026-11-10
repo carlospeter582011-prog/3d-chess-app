@@ -282,6 +282,36 @@ void main() {
     });
   });
 
+  group('landscape phone HUD', () {
+    for (final size in const [Size(800, 360), Size(732, 412), Size(640, 320), Size(900, 400)]) {
+      testWidgets('side panel fits ${size.width.toInt()}x${size.height.toInt()} without overflow', (t) async {
+        t.view.physicalSize = size;
+        t.view.devicePixelRatio = 1;
+        addTearDown(t.view.reset);
+        final g = newGame();
+        g.start(const GameConfig(mode: GameMode.local));
+        final panel = (size.width * 0.36).clamp(250.0, 340.0);
+        await t.pumpWidget(host(Align(
+          alignment: Alignment.centerRight,
+          child: SizedBox(
+            width: panel,
+            child: ListenableBuilder(
+              listenable: g,
+              builder: (_, __) => Hud(game: g, snapshot: g.snapshot, board: g.board, onMenu: () {}, onSettings: () {}, wide: true),
+            ),
+          ),
+        )));
+        expect(t.takeException(), isNull);
+        // everything the player needs is on screen
+        for (final k in ['btn-undo', 'btn-flip', 'btn-top', 'btn-reset', 'btn-draw', 'btn-resign', 'status']) {
+          final r = t.getRect(find.byKey(Key(k)));
+          expect(r.bottom, lessThanOrEqualTo(size.height), reason: '$k below the screen');
+          expect(r.right, lessThanOrEqualTo(size.width), reason: '$k right of the screen');
+        }
+      });
+    }
+  });
+
   group('dialogs', () {
     testWidgets('promotion picker offers queen, rook, bishop, knight', (t) async {
       useTallScreen(t);
