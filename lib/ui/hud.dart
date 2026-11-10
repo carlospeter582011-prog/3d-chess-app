@@ -153,8 +153,8 @@ class _MoveListState extends State<_MoveList> {
     }
     final empty = h.isEmpty;
     return Container(
-      constraints: BoxConstraints(minHeight: compact ? 0 : 38),
-      padding: EdgeInsets.symmetric(horizontal: 12, vertical: compact ? 5 : 8),
+      constraints: BoxConstraints(minHeight: widget.compact ? 0 : 38),
+      padding: EdgeInsets.symmetric(horizontal: 12, vertical: widget.compact ? 5 : 8),
       decoration: BoxDecoration(color: C.panel, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.line)),
       alignment: Alignment.centerLeft,
       child: empty
