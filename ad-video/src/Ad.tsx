@@ -2,12 +2,12 @@ import React from 'react';
 import { AbsoluteFill, Audio, Img, interpolate, Sequence, spring, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import { Board3D, CameraSpec } from './Board3D';
 import { Scene } from './timeline';
-import { mateScene, playScene, staleScene } from './scenes';
+import { mateScene, staleScene } from './scenes';
 
 const FONT = 'Inter, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 const INTRO = 130;
 const END = 140;
-export const AD_FRAMES = INTRO + playScene.total + mateScene.total + staleScene.total + END;
+export const AD_FRAMES = INTRO + mateScene.total + staleScene.total + END;
 
 const fade = (frame: number, total: number, edge = 10) =>
   interpolate(frame, [0, edge, total - edge, total], [0, 1, 1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
@@ -110,7 +110,6 @@ export const Ad: React.FC = () => {
   return (
     <AbsoluteFill style={{ background: '#15110e' }}>
       <Sequence from={at(INTRO)} durationInFrames={INTRO}><Intro /></Sequence>
-      <Sequence from={at(playScene.total)} durationInFrames={playScene.total}><BoardScene scene={playScene} sway={0.3} base={0.1} /></Sequence>
       <Sequence from={at(mateScene.total)} durationInFrames={mateScene.total}><BoardScene scene={mateScene} sway={0.25} base={-0.15} /></Sequence>
       <Sequence from={at(staleScene.total)} durationInFrames={staleScene.total}><BoardScene scene={staleScene} sway={0.3} base={0.2} /></Sequence>
       <Sequence from={at(END)} durationInFrames={END}><EndCard /></Sequence>

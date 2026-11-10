@@ -1,7 +1,7 @@
 // The game positions shown in the ad. Edit the move lists to show different games.
 import { buildScene } from './timeline';
 
-// 1) a normal opening, 2 moves each, at the app's normal speed
+// (not used in the current cut) a normal opening, 2 moves each, at the app's normal speed; add it back in Ad.tsx if wanted
 export const playScene = buildScene({ sans: ['e4', 'e5', 'Nf3', 'Nc6'], lead: 25, tail: 45, pauseMs: 650 });
 
 // 2) four moves, then checkmate (1.e4 f6 2.d4 g5 3.Qh5#): the losing king is thrown

@@ -2,7 +2,7 @@
 
 Source of the app's ad. Everything is code, so it can be edited and re-rendered any time.
 
-**Structure** (about 31 s): intro with logo and a short description -> a normal game (2 moves each) ->
+**Structure** (about 25 s): intro with logo and a short description ->
 checkmate scene (4 moves, mate, losing king thrown off the board, with the app's checkmate jingle) ->
 stalemate scene (stalemate jingle) -> "Download on Google Play" end card. The board scenes show only the board and
 pieces (no highlights or move list). The 3D models, icon and jingles are the game's own files from `../assets`.
