@@ -48,7 +48,8 @@ class ServicesChannel(private val ctx: Context, engine: FlutterEngine) : MethodC
                 "sfxLoad" -> {
                     val name = call.argument<String>("name") ?: throw IllegalArgumentException("name")
                     val wav = call.argument<ByteArray>("wav") ?: throw IllegalArgumentException("wav")
-                    val f = File(ctx.cacheDir, "sfx_$name.wav")
+                    val isMp3 = wav.size > 2 && ((wav[0] == 0x49.toByte() && wav[1] == 0x44.toByte()) || (wav[0] == 0xFF.toByte() && (wav[1].toInt() and 0xE0) == 0xE0))
+                    val f = File(ctx.cacheDir, if (isMp3) "sfx_$name.mp3" else "sfx_$name.wav")
                     f.writeBytes(wav)
                     sounds[name] = pool.load(f.absolutePath, 1)
                     result.success(null)

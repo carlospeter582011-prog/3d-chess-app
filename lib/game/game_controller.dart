@@ -369,14 +369,21 @@ class GameController extends ChangeNotifier {
     }
     await Future.wait(jobs);
     if (_disposed) return mv;
-    _busy = false;
     _updateMarkers();
     final st = computeStatus();
-    if (st.status != GameStatus.playing) {
+    if (st.status == GameStatus.checkmate) {
+      // jingle + the losing king is thrown off the board; the result card appears afterwards
+      sfx.checkmate();
+      await board.knockOverKing(chess.turn);
+      if (_disposed) return mv;
+    } else if (st.status == GameStatus.stalemate) {
+      sfx.stalemate();
+    } else if (st.status != GameStatus.playing) {
       sfx.end();
     } else if (chess.isCheck) {
       sfx.check();
     }
+    _busy = false;
     _refresh();
     _save();
     if (st.status == GameStatus.playing) {

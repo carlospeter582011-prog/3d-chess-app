@@ -54,6 +54,9 @@ abstract class BoardScene {
   /// [capture] is the square of the piece that is taken (differs from [to] for en passant).
   Future<void> movePiece(String from, String to, {String? capture, PT? promotion});
 
+  /// The king of [loser] is knocked over and thrown off the board (checkmate); resolves when it has gone.
+  Future<void> knockOverKing(Side loser);
+
   void lift(String sq);
   void unlift();
   void setMarkers(MarkerSet markers);
