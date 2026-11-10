@@ -386,7 +386,7 @@ void main() {
       expect(r.s.status, GameStatus.checkmate);
       expect(r.s.winner, Side.b);
       expect(r.s.check, isTrue);
-      expect(r.sfx.played.last, 'end');
+      expect(r.sfx.played.last, 'checkmate');
       r.game.tap('a2');
       expect(r.s.selected, isNull);
     });
