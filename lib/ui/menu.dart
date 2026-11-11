@@ -1,14 +1,12 @@
 // Main menu: mode, colour, bot strength, start / continue.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../chess/elo.dart';
 import '../game/game_controller.dart';
 import '../game/settings.dart';
 import 'theme.dart';
-
-/// Clock presets: (minutes per player, seconds added after every move). 0 minutes = no clock.
-const List<(int, int)> clockPresets = [(0, 0), (1, 0), (3, 0), (3, 2), (5, 0), (10, 0), (15, 10), (30, 0)];
 
 String clockLabel(int min, int inc) => min == 0 ? 'Off' : (inc > 0 ? '$min min + ${inc}s' : '$min min');
 
@@ -180,66 +178,19 @@ class MenuScreen extends StatelessWidget {
   }
 }
 
-class _ClockPicker extends StatelessWidget {
+/// Clock: off, or on with the time per player and the seconds added after every move that the player types in.
+class _ClockPicker extends StatefulWidget {
   const _ClockPicker({required this.settings, required this.onSettings});
   final Settings settings;
   final ValueChanged<Settings> onSettings;
 
   @override
-  Widget build(BuildContext context) {
-    final cur = (settings.timeMin, settings.incSec);
-    final isPreset = clockPresets.contains(cur);
-    Widget chip(Key key, String label, bool on, VoidCallback tap) => InkWell(
-          key: key,
-          borderRadius: BorderRadius.circular(999),
-          onTap: tap,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: on ? const Color(0x33F2C977) : null,
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: on ? C.gold : C.line),
-            ),
-            child: Text(label, style: TextStyle(fontSize: 13, color: on ? C.gold2 : C.muted)),
-          ),
-        );
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Row(children: [
-        const Expanded(child: _Heading('Clock (optional)')),
-        Text(clockLabel(settings.timeMin, settings.incSec), key: const Key('clock-label'), style: const TextStyle(color: C.gold2, fontSize: 14, fontWeight: FontWeight.w700)),
-      ]),
-      const SizedBox(height: 8),
-      Wrap(spacing: 6, runSpacing: 6, children: [
-        for (final (min, inc) in clockPresets)
-          chip(Key('clock-$min-$inc'), clockLabel(min, inc), cur == (min, inc), () => onSettings(settings.copyWith(timeMin: min, incSec: inc))),
-        chip(
-          const Key('clock-custom'),
-          isPreset ? 'Custom…' : 'Custom: ${clockLabel(settings.timeMin, settings.incSec)}',
-          !isPreset,
-          () async {
-            final r = await showDialog<(int, int)>(context: context, builder: (_) => _ClockDialog(min: settings.timeMin == 0 ? 5 : settings.timeMin, inc: settings.incSec));
-            if (r != null) onSettings(settings.copyWith(timeMin: r.$1, incSec: r.$2));
-          },
-        ),
-      ]),
-      if (settings.timeMin > 0) ...[
-        const SizedBox(height: 6),
-        const Text('Each player gets this time. The clock starts after the first move; whoever runs out of time loses.', style: TextStyle(color: C.muted, fontSize: 12.5)),
-      ],
-    ]);
-  }
+  State<_ClockPicker> createState() => _ClockPickerState();
 }
 
-class _ClockDialog extends StatefulWidget {
-  const _ClockDialog({required this.min, required this.inc});
-  final int min, inc;
-  @override
-  State<_ClockDialog> createState() => _ClockDialogState();
-}
-
-class _ClockDialogState extends State<_ClockDialog> {
-  late final TextEditingController _min = TextEditingController(text: '${widget.min}');
-  late final TextEditingController _inc = TextEditingController(text: '${widget.inc}');
+class _ClockPickerState extends State<_ClockPicker> {
+  late final TextEditingController _min = TextEditingController(text: '${widget.settings.timeMin == 0 ? 5 : widget.settings.timeMin}');
+  late final TextEditingController _inc = TextEditingController(text: '${widget.settings.incSec}');
 
   @override
   void dispose() {
@@ -248,36 +199,73 @@ class _ClockDialogState extends State<_ClockDialog> {
     super.dispose();
   }
 
-  void _ok() {
+  void _toggle(bool on) {
+    if (!on) {
+      widget.onSettings(widget.settings.copyWith(timeMin: 0));
+      return;
+    }
     final m = (int.tryParse(_min.text.trim()) ?? 5).clamp(1, 180);
     final i = (int.tryParse(_inc.text.trim()) ?? 0).clamp(0, 60);
-    Navigator.of(context).pop((m, i));
+    _min.text = '$m';
+    _inc.text = '$i';
+    widget.onSettings(widget.settings.copyWith(timeMin: m, incSec: i));
   }
 
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-        backgroundColor: C.panel,
-        title: const Text('Custom clock', style: TextStyle(color: C.gold2)),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(
-            key: const Key('clock-min'),
-            controller: _min,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Minutes per player (1–180)'),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            key: const Key('clock-inc'),
-            controller: _inc,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Seconds added per move (0–60)'),
-          ),
-        ]),
-        actions: [
-          TextButton(key: const Key('clock-cancel'), onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
-          TextButton(key: const Key('clock-ok'), onPressed: _ok, child: const Text('OK')),
-        ],
+  void _typed() {
+    final m = int.tryParse(_min.text.trim());
+    final i = int.tryParse(_inc.text.trim()) ?? 0;
+    if (m == null || m < 1) return; // wait until a valid time is typed
+    widget.onSettings(widget.settings.copyWith(timeMin: m.clamp(1, 180), incSec: i.clamp(0, 60)));
+  }
+
+  void _tidy() {
+    final m = (int.tryParse(_min.text.trim()) ?? widget.settings.timeMin).clamp(1, 180);
+    final i = (int.tryParse(_inc.text.trim()) ?? 0).clamp(0, 60);
+    _min.text = '$m';
+    _inc.text = '$i';
+    widget.onSettings(widget.settings.copyWith(timeMin: m, incSec: i));
+  }
+
+  Widget _field(Key key, TextEditingController c, String label) => Expanded(
+        child: TextField(
+          key: key,
+          controller: c,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(3)],
+          decoration: InputDecoration(labelText: label, isDense: true),
+          onChanged: (_) => _typed(),
+          onEditingComplete: () {
+            _tidy();
+            FocusScope.of(context).unfocus();
+          },
+          onTapOutside: (_) {
+            if (widget.settings.timeMin > 0) _tidy();
+          },
+        ),
       );
+
+  @override
+  Widget build(BuildContext context) {
+    final on = widget.settings.timeMin > 0;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Row(children: [
+        const Expanded(child: _Heading('Clock (optional)')),
+        Text(clockLabel(widget.settings.timeMin, widget.settings.incSec), key: const Key('clock-label'), style: const TextStyle(color: C.gold2, fontSize: 14, fontWeight: FontWeight.w700)),
+        const SizedBox(width: 8),
+        Switch(key: const Key('clock-switch'), value: on, onChanged: _toggle),
+      ]),
+      if (on) ...[
+        const SizedBox(height: 4),
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _field(const Key('clock-min'), _min, 'Minutes per player'),
+          const SizedBox(width: 12),
+          _field(const Key('clock-inc'), _inc, 'Seconds added per move'),
+        ]),
+        const SizedBox(height: 6),
+        const Text('The clock starts after the first move. A player who runs out of time loses.', style: TextStyle(color: C.muted, fontSize: 12.5)),
+      ],
+    ]);
+  }
 }
 
 class _Heading extends StatelessWidget {
