@@ -232,12 +232,13 @@ void main() {
     testWidgets('a timed game shows both clocks, an untimed one none', (t) async {
       useTallScreen(t);
       final g = newGame();
-      addTearDown(g.dispose);
       g.start(const GameConfig(mode: GameMode.local, timeSec: 300));
       await t.pumpWidget(hud(g));
       expect(find.byKey(const Key('clock-w')), findsOneWidget);
       expect(find.byKey(const Key('clock-b')), findsOneWidget);
       expect(find.text('5:00'), findsNWidgets(2));
+      await t.pumpWidget(const SizedBox()); // the clock timer must be gone before the test ends
+      g.dispose();
       final g2 = newGame();
       addTearDown(g2.dispose);
       g2.start(const GameConfig(mode: GameMode.local));
