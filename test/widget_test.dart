@@ -96,30 +96,27 @@ void main() {
       expect(find.byKey(const Key('color-seg')), findsNothing);
     });
 
-    testWidgets('clock presets and a custom clock', (t) async {
+    testWidgets('clock: off by default, switch on and type the time and increment, switch off again', (t) async {
       useTallScreen(t);
       final settings = ValueNotifier(const Settings());
       await t.pumpWidget(menu(settings: settings, started: []));
-      expect(find.byKey(const Key('clock-label')).evaluate().isNotEmpty, isTrue);
       expect(t.widget<Text>(find.byKey(const Key('clock-label'))).data, 'Off');
-      await t.ensureVisible(find.byKey(const Key('clock-3-2')));
-      await t.tap(find.byKey(const Key('clock-3-2')));
+      expect(find.byKey(const Key('clock-min')), findsNothing);
+      expect(find.byKey(const Key('clock-custom')), findsNothing); // no presets, no Custom button
+      await t.ensureVisible(find.byKey(const Key('clock-switch')));
+      await t.tap(find.byKey(const Key('clock-switch')));
       await t.pump();
-      expect(settings.value.timeMin, 3);
-      expect(settings.value.incSec, 2);
-      await t.ensureVisible(find.byKey(const Key('clock-custom')));
-      await t.tap(find.byKey(const Key('clock-custom')));
-      await t.pumpAndSettle();
+      expect(settings.value.timeMin, 5);
       await t.enterText(find.byKey(const Key('clock-min')), '7');
       await t.enterText(find.byKey(const Key('clock-inc')), '4');
-      await t.tap(find.byKey(const Key('clock-ok')));
-      await t.pumpAndSettle();
+      await t.pump();
       expect(settings.value.timeMin, 7);
       expect(settings.value.incSec, 4);
-      await t.ensureVisible(find.byKey(const Key('clock-0-0')));
-      await t.tap(find.byKey(const Key('clock-0-0')));
+      expect(t.widget<Text>(find.byKey(const Key('clock-label'))).data, '7 min + 4s');
+      await t.tap(find.byKey(const Key('clock-switch')));
       await t.pump();
       expect(settings.value.timeMin, 0);
+      expect(find.byKey(const Key('clock-min')), findsNothing);
     });
 
     testWidgets('slider changes the Elo within 400..3200', (t) async {
