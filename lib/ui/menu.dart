@@ -20,6 +20,8 @@ class MenuScreen extends StatelessWidget {
     required this.onContinue,
     required this.onResumeSaved,
     required this.onOpenSettings,
+    required this.onHost,
+    required this.onJoin,
   });
 
   final Settings settings;
@@ -30,10 +32,13 @@ class MenuScreen extends StatelessWidget {
   final VoidCallback onContinue;
   final VoidCallback onResumeSaved;
   final VoidCallback onOpenSettings;
+  final VoidCallback onHost;
+  final VoidCallback onJoin;
 
   @override
   Widget build(BuildContext context) {
     final bot = settings.mode == GameMode.bot;
+    final lan = settings.mode == GameMode.lan;
     return Container(
       decoration: const BoxDecoration(
         gradient: RadialGradient(center: Alignment(0, -0.4), radius: 1.1, colors: [Color(0x5914100D), Color(0xCC0A0806)]),
@@ -70,7 +75,11 @@ class MenuScreen extends StatelessWidget {
                   const SizedBox(height: 16),
                   _Seg(
                     key: const Key('mode-seg'),
-                    items: const [('\u{1F916} Play the bot', GameMode.bot), ('\u{1F465} 2 players · 1 device', GameMode.local)],
+                    items: const [
+                      ('\u{1F916} Play the bot', GameMode.bot),
+                      ('\u{1F465} 2 players\n1 phone', GameMode.local),
+                      ('\u{1F4E1} 2 players\n2 phones', GameMode.lan),
+                    ],
                     value: settings.mode,
                     onChanged: (m) => onSettings(settings.copyWith(mode: m)),
                   ),
@@ -124,13 +133,24 @@ class MenuScreen extends StatelessWidget {
                     ]),
                     const SizedBox(height: 8),
                     const Text('Stockfish runs on your device. Elo is approximate.', style: TextStyle(color: C.muted, fontSize: 12.5)),
-                  ] else
+                  ] else if (lan)
+                    const Text(
+                      'Each player uses their own phone. One phone hosts, the other searches for it and joins — no code, no internet needed, just the same Wi-Fi or one phone\'s mobile hotspot.',
+                      key: Key('lan-hint'),
+                      style: TextStyle(color: C.muted, fontSize: 14, height: 1.4),
+                    )
+                  else
                     const Text(
                       'Pass the phone or tablet back and forth — no internet needed. Turn on “Auto-flip board” in settings to turn the view 180° to the player whose turn it is.',
                       style: TextStyle(color: C.muted, fontSize: 14, height: 1.4),
                     ),
                   const SizedBox(height: 16),
-                  GoldButton(key: const Key('start'), label: '▶ Start new game', onPressed: () => onStart(settings)),
+                  if (lan) ...[
+                    GoldButton(key: const Key('lan-host'), label: '\u{1F4E1} Host a game', onPressed: onHost),
+                    const SizedBox(height: 10),
+                    GhostButton(key: const Key('lan-join'), label: '\u{1F50D} Join a game', onPressed: onJoin),
+                  ] else
+                    GoldButton(key: const Key('start'), label: '▶ Start new game', onPressed: () => onStart(settings)),
                   if (!hasActive && saved != null) ...[
                     const SizedBox(height: 10),
                     GhostButton(

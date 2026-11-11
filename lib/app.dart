@@ -10,12 +10,14 @@ import 'chess/uci_engine.dart';
 import 'game/game_controller.dart';
 import 'game/settings.dart';
 import 'game/storage.dart';
+import 'net/lan.dart';
 import 'scene/board_model.dart';
 import 'scene/scene_renderer.dart';
 import 'scene/scene_view.dart';
 import 'platform/ads_service.dart';
 import 'ui/dialogs.dart';
 import 'ui/hud.dart';
+import 'ui/lan_lobby.dart';
 import 'ui/loading.dart';
 import 'ui/menu.dart';
 import 'ui/theme.dart';
@@ -28,6 +30,7 @@ class AppDeps {
     required this.engine,
     required this.store,
     required this.sfx,
+    this.lan = const LanServices(),
     this.autoQuality = Quality.high,
     this.showIntro = false,
     this.introMinimum = const Duration(milliseconds: 1500),
@@ -48,6 +51,9 @@ class AppDeps {
   final BotEngine engine;
   final KeyValueStore store;
   final Sfx sfx;
+
+  /// Two-phone play (replaced by a fake in widget tests).
+  final LanServices lan;
 }
 
 class ChessApp extends StatelessWidget {
@@ -82,6 +88,7 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
   bool showResult = false;
   bool _resultHandled = false;
   bool _wasActive = false;
+  bool? _lobbyHost; // null: closed, true: hosting, false: joining
   final math.Random _rnd = math.Random();
   late final AdsService _ads = AdsService(
     // an App Open ad must never cover a game in progress
@@ -196,6 +203,13 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     game.start(GameConfig(mode: s.mode, humanColor: human, elo: s.elo));
   }
 
+  void _startLan(RemoteLink link, Side mySide, bool isHost) {
+    GameController.clearSaved(d.store);
+    saved = null;
+    setState(() => _lobbyHost = null);
+    game.startLan(link, mySide, isHost: isHost);
+  }
+
   void _resumeSaved() {
     final sv = saved;
     if (sv == null) return;
@@ -247,6 +261,18 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
                 onContinue: game.resume,
                 onResumeSaved: _resumeSaved,
                 onOpenSettings: _openSettings,
+                onHost: () => setState(() => _lobbyHost = true),
+                onJoin: () => setState(() => _lobbyHost = false),
+              ),
+            ),
+          if (ready && !active && _lobbyHost != null)
+            Positioned.fill(
+              child: LanLobby(
+                key: ValueKey('lobby-$_lobbyHost'),
+                host: _lobbyHost!,
+                services: d.lan,
+                onStart: _startLan,
+                onCancel: () => setState(() => _lobbyHost = null),
               ),
             ),
           if (ready && active)
@@ -256,15 +282,17 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
                     top: 0,
                     bottom: 0,
                     width: panelWidth,
-                    child: Hud(game: game, snapshot: snap, board: d.model, onMenu: game.leave, onSettings: _openSettings, wide: true),
+                    child: Hud(game: game, snapshot: snap, board: d.model, onMenu: game.leave, onSettings: _openSettings, wide: true, showMoves: settings.showMoves, showCaptured: settings.showCaptured),
                   )
                 : Positioned.fill(
-                    child: Hud(game: game, snapshot: snap, board: d.model, onMenu: game.leave, onSettings: _openSettings),
+                    child: Hud(game: game, snapshot: snap, board: d.model, onMenu: game.leave, onSettings: _openSettings, showMoves: settings.showMoves, showCaptured: settings.showCaptured),
                   ),
           if (ready && active && snap.promotion != null)
             Positioned.fill(
               child: PromotionDialog(side: snap.turn, onChoose: game.choosePromotion, onCancel: game.cancelPromotion),
             ),
+          if (ready && active && snap.drawOfferIn)
+            Positioned.fill(child: DrawOfferDialog(onAnswer: game.answerDraw)),
           if (ready && active && showResult)
             Positioned.fill(
               child: ResultDialog(
@@ -276,7 +304,11 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
                 },
                 onRematch: () {
                   setState(() => showResult = false);
-                  game.start(snap.config);
+                  if (snap.config.mode == GameMode.lan) {
+                    game.requestRematch();
+                  } else {
+                    game.start(snap.config);
+                  }
                 },
               ),
             ),

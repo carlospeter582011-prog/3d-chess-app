@@ -62,7 +62,7 @@ void main() {
       expect(c.eye.y, greaterThan(0)); // never under the table
     });
 
-    test('zoom is limited to 5..40 units', () {
+    test('zoom is limited to 5..32 units', () {
       final c = OrbitCamera()..animations = false;
       for (var i = 0; i < 100; i++) {
         c.zoomByRatio(1.5);
@@ -73,7 +73,50 @@ void main() {
         c.zoomByRatio(0.5);
         c.update(1 / 60);
       }
-      expect(c.radius, closeTo(40, 1e-9));
+      expect(c.radius, closeTo(32, 1e-9));
+    });
+
+    test('zoom glides: one pinch is applied over several frames, not in one jump', () {
+      final c = OrbitCamera();
+      c.radius = 20;
+      c.zoomByRatio(2);
+      c.update(1 / 60);
+      final first = c.radius;
+      expect(first, lessThan(20));
+      expect(first, greaterThan(20 / math.pow(2, 0.9) + 1)); // far from the end after one frame
+      for (var i = 0; i < 180; i++) {
+        c.update(1 / 60);
+      }
+      expect(c.radius, closeTo(20 / math.pow(2, 0.9), 0.05));
+    });
+
+    test('inertia: a fling keeps the view turning after the finger is lifted, then settles', () {
+      final c = OrbitCamera();
+      c.setViewport(400, 800);
+      final th0 = c.theta;
+      c.fling(900, 0);
+      c.update(1 / 60);
+      final early = (c.theta - th0).abs();
+      expect(early, greaterThan(0));
+      for (var i = 0; i < 240; i++) {
+        c.update(1 / 60);
+      }
+      final total = (c.theta - th0).abs();
+      expect(total, greaterThan(early * 3));
+      expect(c.theta - th0, lessThan(0)); // same direction as a drag to the right
+      final settled = c.theta;
+      c.update(1 / 60);
+      expect(c.theta, closeTo(settled, 1e-6));
+    });
+
+    test('a huge fling is capped so the board is never spun wildly', () {
+      final c = OrbitCamera();
+      c.setViewport(400, 800);
+      c.fling(1e9, 0);
+      for (var i = 0; i < 400; i++) {
+        c.update(1 / 60);
+      }
+      expect(c.theta.abs(), lessThan(2 * math.pi));
     });
 
     test('pinch out zooms in, pinch in zooms out', () {
@@ -94,9 +137,9 @@ void main() {
       for (var i = 0; i < 300; i++) {
         c.update(1 / 60);
       }
-      expect(c.target.x.abs(), lessThanOrEqualTo(6));
-      expect(c.target.z.abs(), lessThanOrEqualTo(6));
-      expect(c.target.y, inInclusiveRange(0, 3));
+      expect(c.target.x.abs(), lessThanOrEqualTo(4.5));
+      expect(c.target.z.abs(), lessThanOrEqualTo(4.5));
+      expect(c.target.y, inInclusiveRange(0, 2.5));
     });
 
     test('reset without animation lands on the fit distance, 43 degrees, White\'s side', () {

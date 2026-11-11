@@ -62,6 +62,7 @@ class PromotionDialog extends StatelessWidget {
 String resultTitle(GameSnapshot s) {
   if (s.winner == null) return 'Draw';
   if (s.config.mode == GameMode.bot) return s.winner == s.config.humanColor ? 'You win! \u{1F389}' : 'Bot wins';
+  if (s.config.mode == GameMode.lan) return s.winner == s.config.humanColor ? 'You win! \u{1F389}' : 'Your opponent wins';
   return '${s.winner!.label} wins!';
 }
 
@@ -90,6 +91,25 @@ class ResultDialog extends StatelessWidget {
       ]),
     );
   }
+}
+
+/// The other player (two-phone game) offers a draw.
+class DrawOfferDialog extends StatelessWidget {
+  const DrawOfferDialog({super.key, required this.onAnswer});
+  final ValueChanged<bool> onAnswer;
+
+  @override
+  Widget build(BuildContext context) => ModalCard(
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const Text('Your opponent offers a draw', textAlign: TextAlign.center, style: TextStyle(fontSize: 20, color: C.gold2)),
+          const SizedBox(height: 16),
+          Row(children: [
+            Expanded(child: GhostButton(key: const Key('draw-decline'), label: 'Decline', onPressed: () => onAnswer(false))),
+            const SizedBox(width: 8),
+            Expanded(child: GoldButton(key: const Key('draw-accept'), label: 'Accept', onPressed: () => onAnswer(true))),
+          ]),
+        ]),
+      );
 }
 
 /// Settings sheet. Changes apply immediately through [onChanged].
@@ -137,6 +157,9 @@ class _SettingsDialogState extends State<SettingsDialog> {
               _toggle(const Key('set-labels'), 'Board coordinates', 'a–h and 1–8 around the board', s.labels, (v) => _set(s.copyWith(labels: v))),
               _toggle(const Key('set-flip'), 'Auto-flip board (2 players)', 'Turns the view 180° after every move, keeping zoom and tilt', s.autoFlip,
                   (v) => _set(s.copyWith(autoFlip: v))),
+              _toggle(const Key('set-moves'), 'Show move list', 'The list of moves played, in the game screen', s.showMoves, (v) => _set(s.copyWith(showMoves: v))),
+              _toggle(const Key('set-captured'), 'Show captured pieces', 'Pieces each player has taken, and the material lead', s.showCaptured,
+                  (v) => _set(s.copyWith(showCaptured: v))),
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Row(children: [
@@ -164,7 +187,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
                 ]),
               ),
               const SizedBox(height: 8),
-              const Text('Drag to orbit · two fingers to pan and zoom.', style: TextStyle(color: C.muted, fontSize: 12.5)),
+              const Text('Drag to orbit · two fingers to pan and zoom · double-tap the board to reset the view.', style: TextStyle(color: C.muted, fontSize: 12.5)),
               const SizedBox(height: 14),
               GoldButton(label: 'Done', onPressed: () => Navigator.of(context).pop()),
             ]),

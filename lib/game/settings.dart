@@ -4,7 +4,8 @@ import 'dart:convert';
 
 import '../chess/types.dart';
 
-enum GameMode { bot, local }
+/// bot = against the computer, local = two players on one phone, lan = two phones over Wi-Fi / hotspot.
+enum GameMode { bot, local, lan }
 
 enum GameStatus { playing, checkmate, stalemate, draw, resigned }
 
@@ -42,7 +43,7 @@ class GameConfig {
 
   static GameConfig? fromJson(Object? j) {
     if (j is! Map) return null;
-    final mode = j['mode'] == 'local' ? GameMode.local : GameMode.bot;
+    final mode = j['mode'] == 'local' ? GameMode.local : (j['mode'] == 'lan' ? GameMode.lan : GameMode.bot);
     final human = j['humanColor'] == 'b' ? Side.b : Side.w;
     final elo = j['elo'] is num ? (j['elo'] as num).round() : 1200;
     return GameConfig(mode: mode, humanColor: human, elo: elo);
@@ -61,6 +62,10 @@ class Settings {
   final bool labels;
   final Quality quality;
   final bool autoFlip;
+
+  /// Move list and captured pieces are hidden unless the player turns them on.
+  final bool showMoves;
+  final bool showCaptured;
   final int elo;
   final HumanColor humanColor;
   final GameMode mode;
@@ -70,6 +75,8 @@ class Settings {
     this.labels = true,
     this.quality = Quality.auto,
     this.autoFlip = false,
+    this.showMoves = false,
+    this.showCaptured = false,
     this.elo = 1200,
     this.humanColor = HumanColor.white,
     this.mode = GameMode.bot,
@@ -80,6 +87,8 @@ class Settings {
     bool? labels,
     Quality? quality,
     bool? autoFlip,
+    bool? showMoves,
+    bool? showCaptured,
     int? elo,
     HumanColor? humanColor,
     GameMode? mode,
@@ -89,6 +98,8 @@ class Settings {
         labels: labels ?? this.labels,
         quality: quality ?? this.quality,
         autoFlip: autoFlip ?? this.autoFlip,
+        showMoves: showMoves ?? this.showMoves,
+        showCaptured: showCaptured ?? this.showCaptured,
         elo: elo ?? this.elo,
         humanColor: humanColor ?? this.humanColor,
         mode: mode ?? this.mode,
@@ -99,6 +110,8 @@ class Settings {
         'labels': labels,
         'quality': quality.name,
         'autoFlip': autoFlip,
+        'showMoves': showMoves,
+        'showCaptured': showCaptured,
         'elo': elo,
         'humanColor': humanColor.name,
         'mode': mode.name,
@@ -122,6 +135,8 @@ class Settings {
         labels: j['labels'] is bool ? j['labels'] as bool : true,
         quality: pick(Quality.values, j['quality'], Quality.auto),
         autoFlip: j['autoFlip'] is bool ? j['autoFlip'] as bool : false,
+        showMoves: j['showMoves'] is bool ? j['showMoves'] as bool : false,
+        showCaptured: j['showCaptured'] is bool ? j['showCaptured'] as bool : false,
         elo: j['elo'] is num ? (j['elo'] as num).round().clamp(400, 3200) : 1200,
         humanColor: pick(HumanColor.values, j['humanColor'], HumanColor.white),
         mode: pick(GameMode.values, j['mode'], GameMode.bot),

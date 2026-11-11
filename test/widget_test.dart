@@ -61,6 +61,8 @@ void main() {
             onContinue: onContinue ?? () {},
             onResumeSaved: onResumeSaved ?? () {},
             onOpenSettings: () {},
+            onHost: () {},
+            onJoin: () {},
           ),
         ));
 
@@ -87,7 +89,7 @@ void main() {
       useTallScreen(t);
       final settings = ValueNotifier(const Settings());
       await t.pumpWidget(menu(settings: settings, started: []));
-      await t.tap(find.textContaining('2 players'));
+      await t.tap(find.textContaining('1 phone'));
       await t.pump();
       expect(settings.value.mode, GameMode.local);
       expect(find.byKey(const Key('elo-slider')), findsNothing);
@@ -172,7 +174,7 @@ void main() {
   });
 
   group('HUD', () {
-    Widget hud(GameController g, {VoidCallback? onMenu}) => host(ListenableBuilder(
+    Widget hud(GameController g, {VoidCallback? onMenu, bool showMoves = true, bool showCaptured = true}) => host(ListenableBuilder(
           listenable: g,
           builder: (_, __) => Hud(
             game: g,
@@ -180,6 +182,8 @@ void main() {
             board: g.board,
             onMenu: onMenu ?? () {},
             onSettings: () {},
+            showMoves: showMoves,
+            showCaptured: showCaptured,
           ),
         ));
 
@@ -197,6 +201,15 @@ void main() {
       await t.pump();
       await t.pump();
       expect(find.textContaining('1. e4'), findsOneWidget);
+    });
+
+    testWidgets('move list is hidden when the setting is off', (t) async {
+      useTallScreen(t);
+      final g = newGame();
+      g.start(const GameConfig(mode: GameMode.bot, humanColor: Side.w, elo: 1800));
+      await t.pumpWidget(hud(g, showMoves: false, showCaptured: false));
+      expect(find.text('Moves appear here'), findsNothing);
+      expect(find.text('Your move'), findsOneWidget);
     });
 
     testWidgets('undo is disabled at the start', (t) async {
