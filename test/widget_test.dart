@@ -89,7 +89,7 @@ void main() {
       useTallScreen(t);
       final settings = ValueNotifier(const Settings());
       await t.pumpWidget(menu(settings: settings, started: []));
-      await t.tap(find.textContaining('2 players'));
+      await t.tap(find.textContaining('1 phone'));
       await t.pump();
       expect(settings.value.mode, GameMode.local);
       expect(find.byKey(const Key('elo-slider')), findsNothing);

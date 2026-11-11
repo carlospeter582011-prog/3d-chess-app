@@ -110,8 +110,9 @@ void main() {
       final host = LanHost(name: 'Full', discoveryPort: 47892, debugTargets: const []);
       await host.start();
       final ad = LanAdvert(id: host.id, name: 'Full', address: '127.0.0.1', port: host.port);
+      final guestFuture = host.guests.first;
       final first = await joinLanGame(ad);
-      await host.guests.first.timeout(const Duration(seconds: 5));
+      await guestFuture.timeout(const Duration(seconds: 5));
       await expectLater(joinLanGame(ad), throwsA(isA<LanJoinException>()));
       await first.close();
       await host.stop();
