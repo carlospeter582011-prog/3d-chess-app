@@ -96,6 +96,32 @@ void main() {
       expect(find.byKey(const Key('color-seg')), findsNothing);
     });
 
+    testWidgets('clock presets and a custom clock', (t) async {
+      useTallScreen(t);
+      final settings = ValueNotifier(const Settings());
+      await t.pumpWidget(menu(settings: settings, started: []));
+      expect(find.byKey(const Key('clock-label')).evaluate().isNotEmpty, isTrue);
+      expect(t.widget<Text>(find.byKey(const Key('clock-label'))).data, 'Off');
+      await t.ensureVisible(find.byKey(const Key('clock-3-2')));
+      await t.tap(find.byKey(const Key('clock-3-2')));
+      await t.pump();
+      expect(settings.value.timeMin, 3);
+      expect(settings.value.incSec, 2);
+      await t.ensureVisible(find.byKey(const Key('clock-custom')));
+      await t.tap(find.byKey(const Key('clock-custom')));
+      await t.pumpAndSettle();
+      await t.enterText(find.byKey(const Key('clock-min')), '7');
+      await t.enterText(find.byKey(const Key('clock-inc')), '4');
+      await t.tap(find.byKey(const Key('clock-ok')));
+      await t.pumpAndSettle();
+      expect(settings.value.timeMin, 7);
+      expect(settings.value.incSec, 4);
+      await t.ensureVisible(find.byKey(const Key('clock-0-0')));
+      await t.tap(find.byKey(const Key('clock-0-0')));
+      await t.pump();
+      expect(settings.value.timeMin, 0);
+    });
+
     testWidgets('slider changes the Elo within 400..3200', (t) async {
       useTallScreen(t);
       final settings = ValueNotifier(const Settings());
@@ -201,6 +227,23 @@ void main() {
       await t.pump();
       await t.pump();
       expect(find.textContaining('1. e4'), findsOneWidget);
+    });
+
+    testWidgets('a timed game shows both clocks, an untimed one none', (t) async {
+      useTallScreen(t);
+      final g = newGame();
+      g.start(const GameConfig(mode: GameMode.local, timeSec: 300));
+      await t.pumpWidget(hud(g));
+      expect(find.byKey(const Key('clock-w')), findsOneWidget);
+      expect(find.byKey(const Key('clock-b')), findsOneWidget);
+      expect(find.text('5:00'), findsNWidgets(2));
+      await t.pumpWidget(const SizedBox()); // the clock timer must be gone before the test ends
+      g.dispose();
+      final g2 = newGame();
+      addTearDown(g2.dispose);
+      g2.start(const GameConfig(mode: GameMode.local));
+      await t.pumpWidget(hud(g2));
+      expect(find.byKey(const Key('clock-w')), findsNothing);
     });
 
     testWidgets('move list is hidden when the setting is off', (t) async {

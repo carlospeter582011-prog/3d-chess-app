@@ -53,6 +53,9 @@ class GameSnapshot {
   /// Two-phone games: we asked for a rematch and wait for the other player.
   final bool rematchWaiting;
 
+  /// Chess clock: milliseconds left for each side (only meaningful when `config.timed`).
+  final int whiteMs, blackMs;
+
   const GameSnapshot({
     required this.version,
     required this.active,
@@ -75,13 +78,16 @@ class GameSnapshot {
     this.drawOfferIn = false,
     this.drawOfferOut = false,
     this.rematchWaiting = false,
+    this.whiteMs = 0,
+    this.blackMs = 0,
   });
 }
 
 class SavedGame {
   final GameConfig config;
   final List<String> moves; // UCI
-  const SavedGame(this.config, this.moves);
+  final int? whiteMs, blackMs; // clock, when the game was timed
+  const SavedGame(this.config, this.moves, {this.whiteMs, this.blackMs});
 }
 
 class GameController extends ChangeNotifier {
@@ -92,7 +98,9 @@ class GameController extends ChangeNotifier {
     required this.sfx,
     math.Random? random,
     this.thinkMinimum = const Duration(milliseconds: 450),
-  }) : _random = random ?? math.Random() {
+    DateTime Function()? now,
+  })  : _now = now ?? DateTime.now,
+        _random = random ?? math.Random() {
     _refresh();
   }
 
@@ -101,6 +109,7 @@ class GameController extends ChangeNotifier {
   final KeyValueStore store;
   final Sfx sfx;
   final math.Random _random;
+  final DateTime Function() _now;
 
   /// A bot move is never played faster than this, so it does not feel instant.
   final Duration thinkMinimum;
@@ -117,6 +126,7 @@ class GameController extends ChangeNotifier {
   int _epoch = 0;
   Side? _resigned; // side that resigned
   bool _agreedDraw = false;
+  Side? _flagged; // side whose clock ran out
   bool _engineError = false;
   bool autoFlip = false;
   bool _disposed = false;
@@ -129,6 +139,13 @@ class GameController extends ChangeNotifier {
   bool _drawIn = false, _drawOut = false;
   bool _rematchMine = false, _rematchTheirs = false;
   bool get _lan => config.mode == GameMode.lan;
+
+  // chess clock
+  Timer? _clockTimer;
+  int _wMs = 0, _bMs = 0;
+  DateTime? _clockAt;
+  int _shown = -1;
+  bool get _timed => config.timed;
 
   GameSnapshot get snapshot => _snap;
   bool get isBusy => _busy;
@@ -165,7 +182,10 @@ class GameController extends ChangeNotifier {
       drawOfferIn: _drawIn,
       drawOfferOut: _drawOut,
       rematchWaiting: _rematchMine && !_rematchTheirs,
+      whiteMs: _wMs,
+      blackMs: _bMs,
     );
+    _shown = _displaySecond();
     notifyListeners();
   }
 
@@ -173,6 +193,8 @@ class GameController extends ChangeNotifier {
     final c = chess;
     final r = _resigned;
     if (r != null) return (status: GameStatus.resigned, reason: '${r.label} resigned', winner: r.other);
+    final f = _flagged;
+    if (f != null) return (status: GameStatus.resigned, reason: '${f.label} ran out of time', winner: f.other);
     if (_agreedDraw) return (status: GameStatus.draw, reason: 'Draw agreed', winner: null);
     if (c.isCheckmate) return (status: GameStatus.checkmate, reason: 'Checkmate', winner: c.turn.other);
     if (c.isStalemate) return (status: GameStatus.stalemate, reason: 'Stalemate', winner: null);
@@ -198,7 +220,7 @@ class GameController extends ChangeNotifier {
   }
 
   /// Starts a new game, optionally resuming from a list of UCI moves.
-  void start(GameConfig cfg, {List<String> moves = const []}) {
+  void start(GameConfig cfg, {List<String> moves = const [], int? whiteMs, int? blackMs}) {
     _cancelThinking();
     if (cfg.mode != GameMode.lan) _dropLink();
     _drawIn = _drawOut = _rematchMine = _rematchTheirs = false;
@@ -212,12 +234,17 @@ class GameController extends ChangeNotifier {
       }
     }
     _resigned = null;
+    _flagged = null;
     _agreedDraw = false;
     _selected = null;
     _promotion = null;
     _busy = false;
     _engineError = false;
     _active = true;
+    _wMs = whiteMs ?? cfg.timeSec * 1000;
+    _bMs = blackMs ?? cfg.timeSec * 1000;
+    _clockAt = _now();
+    _syncClockTimer();
     engine.resetGame();
     syncBoard();
     final side = cfg.mode == GameMode.local ? chess.turn : cfg.humanColor;
@@ -237,6 +264,7 @@ class GameController extends ChangeNotifier {
       chess = Chess();
       config = const GameConfig();
       _resigned = null;
+      _flagged = null;
       _agreedDraw = false;
       _selected = null;
       _promotion = null;
@@ -245,12 +273,17 @@ class GameController extends ChangeNotifier {
       _drawIn = _drawOut = _rematchMine = _rematchTheirs = false;
       syncBoard();
     }
+    _settleClock();
     _active = false;
+    _clockAt = null;
+    _syncClockTimer();
     _refresh();
   }
 
   void resume() {
     _active = true;
+    _clockAt = _now();
+    _syncClockTimer();
     _refresh();
     unawaited(_maybeBotMove());
   }
@@ -264,7 +297,8 @@ class GameController extends ChangeNotifier {
         store.remove(saveKey);
         return;
       }
-      store.set(saveKey, jsonEncode({'config': config.toJson(), 'moves': chess.uciHistory}));
+      _settleClock();
+      store.set(saveKey, jsonEncode({'config': config.toJson(), 'moves': chess.uciHistory, if (_timed) 'clock': {'w': _wMs, 'b': _bMs}}));
     } catch (e) {
       debugPrint('save failed: $e');
     }
@@ -282,7 +316,13 @@ class GameController extends ChangeNotifier {
       final list = moves.whereType<String>().toList();
       // validate: a corrupted save must never crash the app
       Chess.fromUci(list);
-      return SavedGame(cfg, list);
+      final clock = j['clock'];
+      int? w, b;
+      if (cfg.timed && clock is Map && clock['w'] is num && clock['b'] is num) {
+        w = (clock['w'] as num).round().clamp(1, 1 << 30);
+        b = (clock['b'] as num).round().clamp(1, 1 << 30);
+      }
+      return SavedGame(cfg, list, whiteMs: w, blackMs: b);
     } catch (_) {
       return null;
     }
@@ -394,12 +434,22 @@ class GameController extends ChangeNotifier {
   Future<Move?> playMove(String from, String to, [PT? promotion, bool fromRemote = false]) async {
     _busy = true;
     _selected = null;
+    _settleClock();
+    final mover = chess.turn;
     final mv = chess.move(from, to, promotion?.ch);
     if (mv == null) {
       _busy = false;
       _updateMarkers();
       _refresh();
       return null;
+    }
+    if (_timed) {
+      if (mover == Side.w) {
+        _wMs += config.incSec * 1000;
+      } else {
+        _bMs += config.incSec * 1000;
+      }
+      _clockAt = _now();
     }
     if (_lan && !fromRemote) _link?.send({'t': 'move', 'uci': mv.uci});
     _drawIn = _drawOut = false; // a pending draw offer lapses once a move is played
@@ -490,7 +540,7 @@ class GameController extends ChangeNotifier {
 
   // ------------------------------------------------------------------ game actions
   void undo() {
-    if (_lan || _busy || chess.history.isEmpty || _resigned != null) return;
+    if (_lan || _busy || chess.history.isEmpty || _resigned != null || _flagged != null) return;
     _cancelThinking();
     _agreedDraw = false;
     chess.undo();
@@ -541,7 +591,7 @@ class GameController extends ChangeNotifier {
 
   // ------------------------------------------------------------------ two-phone games
   /// Starts a two-phone game on an open connection. [mySide] is this phone's colour; the host decides the colours.
-  void startLan(RemoteLink link, Side mySide, {required bool isHost}) {
+  void startLan(RemoteLink link, Side mySide, {required bool isHost, int timeSec = 0, int incSec = 0}) {
     _dropLink();
     _link = link;
     _isHost = isHost;
@@ -550,7 +600,7 @@ class GameController extends ChangeNotifier {
     unawaited(link.done.then((_) {
       if (identical(_link, link)) _onLinkLost();
     }));
-    start(GameConfig(mode: GameMode.lan, humanColor: mySide));
+    start(GameConfig(mode: GameMode.lan, humanColor: mySide, timeSec: timeSec, incSec: incSec));
   }
 
   void _dropLink() {
@@ -592,13 +642,25 @@ class GameController extends ChangeNotifier {
             _drawOut = false;
             _refresh();
         }
+      case 'timeout':
+        if (!_timed || computeStatus().status != GameStatus.playing) return;
+        _flagged = config.humanColor.other;
+        _finishQuietly();
       case 'rematch':
         _rematchTheirs = true;
         _refresh();
         _maybeRematch();
       case 'start':
         final you = m['you'];
-        if (!_isHost && (you == 'w' || you == 'b')) start(GameConfig(mode: GameMode.lan, humanColor: sideFromChar(you as String)));
+        if (!_isHost && (you == 'w' || you == 'b')) {
+          final t = m['time'], i = m['inc'];
+          start(GameConfig(
+            mode: GameMode.lan,
+            humanColor: sideFromChar(you as String),
+            timeSec: t is num ? t.round().clamp(0, 3 * 3600) : 0,
+            incSec: i is num ? i.round().clamp(0, 60) : 0,
+          ));
+        }
     }
   }
 
@@ -661,8 +723,8 @@ class GameController extends ChangeNotifier {
   void _maybeRematch() {
     if (!(_rematchMine && _rematchTheirs && _isHost && _link != null)) return;
     final guestNew = config.humanColor; // the host's old colour goes to the guest
-    _link!.send({'t': 'start', 'you': guestNew.ch});
-    start(GameConfig(mode: GameMode.lan, humanColor: config.humanColor.other));
+    _link!.send({'t': 'start', 'you': guestNew.ch, 'time': config.timeSec, 'inc': config.incSec});
+    start(GameConfig(mode: GameMode.lan, humanColor: config.humanColor.other, timeSec: config.timeSec, incSec: config.incSec));
   }
 
   /// Developer / test hook: jump to an arbitrary position.
@@ -673,13 +735,79 @@ class GameController extends ChangeNotifier {
     _promotion = null;
     _busy = false;
     _resigned = null;
+    _flagged = null;
     _agreedDraw = false;
     syncBoard();
     _refresh();
   }
 
+  // ------------------------------------------------------------------ chess clock
+  int _msOf(Side s) => s == Side.w ? _wMs : _bMs;
+
+  /// The clock only runs once the first move has been played, while a game is on screen.
+  bool get _clockRunning =>
+      _timed && _active && _flagged == null && !_linkLost && chess.history.isNotEmpty && computeStatus().status == GameStatus.playing;
+
+  int _displaySecond() => (_msOf(chess.turn) + 999) ~/ 1000;
+
+  /// Charges the time since the last call to the side to move.
+  void _settleClock() {
+    final at = _clockAt;
+    final now = _now();
+    _clockAt = _timed && _active ? now : null;
+    if (at == null || !_clockRunning) return;
+    final ms = now.difference(at).inMilliseconds;
+    if (ms <= 0) return;
+    if (chess.turn == Side.w) {
+      _wMs = math.max(0, _wMs - ms);
+    } else {
+      _bMs = math.max(0, _bMs - ms);
+    }
+  }
+
+  void _syncClockTimer() {
+    final need = _timed && _active && _flagged == null && computeStatus().status == GameStatus.playing;
+    if (!need) {
+      _clockTimer?.cancel();
+      _clockTimer = null;
+    } else {
+      _clockTimer ??= Timer.periodic(const Duration(milliseconds: 250), (_) => debugTickClock());
+    }
+  }
+
+  /// One clock step (called by the timer; tests call it directly).
+  @visibleForTesting
+  void debugTickClock() {
+    if (_disposed) return;
+    _settleClock();
+    if (!_clockRunning) {
+      if (computeStatus().status != GameStatus.playing) _syncClockTimer();
+      return;
+    }
+    final turn = chess.turn;
+    if (_msOf(turn) <= 0) {
+      // two phones: each phone only declares its OWN clock empty, so both always agree on the result
+      if (_lan && turn != config.humanColor) {
+        _refresh();
+        return;
+      }
+      _flag(turn);
+      return;
+    }
+    if (_displaySecond() != _shown) _refresh();
+  }
+
+  void _flag(Side s) {
+    _cancelThinking();
+    _flagged = s;
+    if (_lan) _link?.send({'t': 'timeout'});
+    _finishQuietly();
+  }
+
   @override
   void dispose() {
+    _clockTimer?.cancel();
+    _clockTimer = null;
     _disposed = true;
     _dropLink();
     _epoch++;

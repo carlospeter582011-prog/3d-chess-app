@@ -66,25 +66,31 @@ void main() {
     tall(t);
     final host = _Host();
     final link = _Link();
-    (RemoteLink, Side, bool)? started;
+    (RemoteLink, Side, bool, int, int)? started;
     await t.pumpWidget(wrap(LanLobby(
       host: true,
       services: LanServices(makeHost: () => host),
-      onStart: (l, s, h) => started = (l, s, h),
+      onStart: (l, s, h, t, i) => started = (l, s, h, t, i),
       onCancel: () {},
+      timeSec: 300,
+      incSec: 2,
     )));
     await t.pump();
     expect(find.byKey(const Key('lan-waiting')), findsOneWidget);
     host.ctl.add(LanGuest(link, 'Phone B'));
     await t.pump();
     expect(find.byKey(const Key('lan-joined')), findsOneWidget);
+    expect(find.text('Clock: 5 min + 2s'), findsOneWidget);
     await t.tap(find.byKey(const Key('lan-color-black')));
     await t.pump();
     await t.tap(find.byKey(const Key('lan-start')));
     await t.pump();
     expect(started!.$2, Side.b);
     expect(started!.$3, isTrue);
-    expect(link.sent.single, {'t': 'start', 'you': 'w'}); // the guest gets the other colour
+    expect(link.sent.single, {'t': 'start', 'you': 'w', 'time': 300, 'inc': 2}); // the guest gets the other colour and the clock
+    expect(started!.$4, 300);
+    expect(started!.$5, 2);
+
     expect(host.stopped, isTrue);
   });
 
@@ -92,7 +98,7 @@ void main() {
     tall(t);
     final host = _Host();
     final link = _Link();
-    await t.pumpWidget(wrap(LanLobby(host: true, services: LanServices(makeHost: () => host), onStart: (_, __, ___) {}, onCancel: () {})));
+    await t.pumpWidget(wrap(LanLobby(host: true, services: LanServices(makeHost: () => host), onStart: (_, __, ___, ____, _____) {}, onCancel: () {})));
     await t.pump();
     host.ctl.add(LanGuest(link, 'B'));
     await t.pump();
@@ -107,7 +113,7 @@ void main() {
     final scanner = _Scanner();
     final link = _Link();
     LanAdvert? joined;
-    (RemoteLink, Side, bool)? started;
+    (RemoteLink, Side, bool, int, int)? started;
     await t.pumpWidget(wrap(LanLobby(
       host: false,
       services: LanServices(
@@ -117,7 +123,7 @@ void main() {
           return link;
         },
       ),
-      onStart: (l, s, h) => started = (l, s, h),
+      onStart: (l, s, h, t, i) => started = (l, s, h, t, i),
       onCancel: () {},
     )));
     await t.pump();
@@ -133,8 +139,10 @@ void main() {
     expect(joined, ad);
     expect(find.byKey(const Key('lan-wait-start')), findsOneWidget);
     expect(started, isNull);
-    link.in_.add({'t': 'start', 'you': 'b'});
+    link.in_.add({'t': 'start', 'you': 'b', 'time': 600, 'inc': 5});
     expect(started!.$2, Side.b);
+    expect(started!.$4, 600);
+    expect(started!.$5, 5);
     expect(started!.$3, isFalse);
   });
 
@@ -146,7 +154,7 @@ void main() {
     await t.pumpWidget(wrap(LanLobby(
       host: false,
       services: LanServices(makeScanner: () => scanner, join: (_) async => throw LanJoinException('That game already has two players.')),
-      onStart: (_, __, ___) {},
+      onStart: (_, __, ___, ____, _____) {},
       onCancel: () {},
     )));
     await t.pump();
@@ -160,7 +168,7 @@ void main() {
   testWidgets('cancel calls back', (t) async {
     tall(t);
     var cancelled = 0;
-    await t.pumpWidget(wrap(LanLobby(host: false, services: LanServices(makeScanner: _Scanner.new), onStart: (_, __, ___) {}, onCancel: () => cancelled++, rnd: math.Random(1))));
+    await t.pumpWidget(wrap(LanLobby(host: false, services: LanServices(makeScanner: _Scanner.new), onStart: (_, __, ___, ____, _____) {}, onCancel: () => cancelled++, rnd: math.Random(1))));
     await t.pump();
     await t.tap(find.byKey(const Key('lan-cancel')));
     expect(cancelled, 1);

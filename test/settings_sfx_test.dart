@@ -32,8 +32,12 @@ void main() {
         mode: GameMode.lan,
         showMoves: true,
         showCaptured: true,
+        timeMin: 7,
+        incSec: 4,
       );
       expect(Settings.decode(s.encode()), s);
+      expect(Settings.decode(s.encode()).timeMin, 7);
+      expect(const Settings().timeMin, 0); // the clock is optional and off by default
       expect(Settings.decode(const Settings().encode()).showMoves, isFalse);
     });
     test('missing, empty or broken data gives defaults', () {

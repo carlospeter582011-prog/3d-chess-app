@@ -8,20 +8,24 @@ import 'package:flutter/material.dart';
 import '../chess/types.dart';
 import '../game/settings.dart';
 import '../net/lan.dart';
+import 'menu.dart' show clockLabel;
 import 'theme.dart';
 
 /// Called when the game is ready: the link, which side this phone plays, and whether this phone is the host.
-typedef LanStart = void Function(RemoteLink link, Side mySide, bool isHost);
+typedef LanStart = void Function(RemoteLink link, Side mySide, bool isHost, int timeSec, int incSec);
 
 Side _sideOf(String? ch) => ch == 'b' ? Side.b : Side.w;
 
 class LanLobby extends StatefulWidget {
-  const LanLobby({super.key, required this.host, required this.services, required this.onStart, required this.onCancel, this.rnd});
+  const LanLobby({super.key, required this.host, required this.services, required this.onStart, required this.onCancel, this.rnd, this.timeSec = 0, this.incSec = 0});
   final bool host;
   final LanServices services;
   final LanStart onStart;
   final VoidCallback onCancel;
   final math.Random? rnd;
+
+  /// Host only: the clock chosen in the menu, sent to the guest with the start message.
+  final int timeSec, incSec;
 
   @override
   State<LanLobby> createState() => _LanLobbyState();
@@ -93,10 +97,10 @@ class _LanLobbyState extends State<LanLobby> {
       HumanColor.black => Side.b,
       HumanColor.random => (widget.rnd ?? math.Random()).nextBool() ? Side.w : Side.b,
     };
-    g.link.send({'t': 'start', 'you': hostSide.other.ch});
+    g.link.send({'t': 'start', 'you': hostSide.other.ch, 'time': widget.timeSec, 'inc': widget.incSec});
     _handedOver = true;
     unawaited(_host?.stop());
-    widget.onStart(g.link, hostSide, true);
+    widget.onStart(g.link, hostSide, true, widget.timeSec, widget.incSec);
   }
 
   Future<void> _join(LanAdvert ad) async {
@@ -116,7 +120,8 @@ class _LanLobbyState extends State<LanLobby> {
         if (m['t'] == 'start' && !_handedOver) {
           _handedOver = true;
           unawaited(_scanner?.stop());
-          widget.onStart(link, _sideOf(m['you'] as String?), false);
+          final t = m['time'], i = m['inc'];
+          widget.onStart(link, _sideOf(m['you'] as String?), false, t is num ? t.round() : 0, i is num ? i.round() : 0);
         } else if (m['t'] == 'bye') {
           _leftHost();
         }
@@ -247,6 +252,12 @@ class _LanLobbyState extends State<LanLobby> {
             ),
           ),
       ]),
+      const SizedBox(height: 10),
+      Text(
+        widget.timeSec == 0 ? 'Clock: off' : 'Clock: ${clockLabel(widget.timeSec ~/ 60, widget.incSec)}',
+        key: const Key('lan-clock'),
+        style: const TextStyle(color: C.muted, fontSize: 13.5),
+      ),
       const SizedBox(height: 16),
       GoldButton(key: const Key('lan-start'), label: '▶ Start game', onPressed: _begin),
     ];
