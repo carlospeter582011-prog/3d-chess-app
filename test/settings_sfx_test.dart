@@ -18,6 +18,8 @@ void main() {
       expect(s.elo, 1200);
       expect(s.humanColor, HumanColor.white);
       expect(s.mode, GameMode.bot);
+      expect(s.showMoves, isFalse); // move list and captured pieces are off until switched on in Settings
+      expect(s.showCaptured, isFalse);
     });
     test('encode / decode round trip', () {
       const s = Settings(
@@ -27,9 +29,12 @@ void main() {
         autoFlip: true,
         elo: 2450,
         humanColor: HumanColor.random,
-        mode: GameMode.local,
+        mode: GameMode.lan,
+        showMoves: true,
+        showCaptured: true,
       );
       expect(Settings.decode(s.encode()), s);
+      expect(Settings.decode(const Settings().encode()).showMoves, isFalse);
     });
     test('missing, empty or broken data gives defaults', () {
       for (final bad in [null, '', 'garbage', '[]', '42', '{"elo":"x","quality":"ultra","mode":5}']) {

@@ -56,6 +56,11 @@ class _SceneViewState extends State<SceneView> with SingleTickerProviderStateMix
   Offset? _downPos;
   DateTime _downTime = DateTime.now();
   bool _multi = false;
+  // drag speed (px/s, smoothed) for the release glide, and the last tap for double-tap-to-reset
+  Offset _vel = Offset.zero;
+  Duration _lastMoveAt = Duration.zero;
+  Offset? _lastTapPos;
+  DateTime _lastTapTime = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
   void initState() {
@@ -136,6 +141,7 @@ class _SceneViewState extends State<SceneView> with SingleTickerProviderStateMix
       _downPos = e.localPosition;
       _downTime = DateTime.now();
       _multi = false;
+      _vel = Offset.zero;
       widget.model.setAutoRotate(false);
     } else {
       _multi = true;
@@ -149,6 +155,9 @@ class _SceneViewState extends State<SceneView> with SingleTickerProviderStateMix
     if (_pointers.length == 1) {
       final d = e.localPosition - prev;
       cam.rotateByPixels(d.dx, d.dy);
+      final dtm = (e.timeStamp - _lastMoveAt).inMicroseconds / 1e6;
+      if (dtm > 0 && dtm < 0.1) _vel = _vel * 0.6 + (d / dtm) * 0.4;
+      _lastMoveAt = e.timeStamp;
     } else if (_pointers.length == 2) {
       final ids = _pointers.keys.toList();
       final a0 = _pointers[ids[0]]!, b0 = _pointers[ids[1]]!;
@@ -171,7 +180,12 @@ class _SceneViewState extends State<SceneView> with SingleTickerProviderStateMix
       _downPos = null;
       final moved = (e.localPosition - down).distance;
       final quick = DateTime.now().difference(_downTime).inMilliseconds < 600;
-      if (!_multi && moved < 9 && quick) _tap(e.localPosition);
+      if (!_multi && moved < 9 && quick) {
+        _tap(e.localPosition);
+      } else if (!_multi && moved >= 9 && _vel.distance > 200 && (e.timeStamp - _lastMoveAt).inMilliseconds < 90) {
+        widget.model.camera.fling(_vel.dx, _vel.dy); // let go while still moving: keep gliding
+        widget.model.requestRender();
+      }
     }
   }
 
@@ -182,6 +196,16 @@ class _SceneViewState extends State<SceneView> with SingleTickerProviderStateMix
 
   void _tap(Offset p) {
     final m = widget.model;
+    // a second tap on the same spot within 0.3 s resets the view instead of moving a piece
+    final now = DateTime.now();
+    final last = _lastTapPos;
+    if (last != null && now.difference(_lastTapTime).inMilliseconds < 300 && (p - last).distance < 28) {
+      _lastTapPos = null;
+      m.resetCamera(animate: true, side: m.viewSide());
+      return;
+    }
+    _lastTapPos = p;
+    _lastTapTime = now;
     final sq = m.pick(p.dx, p.dy);
     if (sq != null) widget.onTap(sq, m.pickGround(p.dx, p.dy));
   }

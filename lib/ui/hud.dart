@@ -23,6 +23,7 @@ int materialBalance(GameSnapshot s, Side c) {
 /// The status line shown at the top.
 ({String text, String tone}) statusText(GameSnapshot s) {
   final bot = s.config.mode == GameMode.bot;
+  final lan = s.config.mode == GameMode.lan;
   final human = s.config.humanColor;
   if (s.status != GameStatus.playing) {
     final w = s.winner?.label;
@@ -33,11 +34,14 @@ int materialBalance(GameSnapshot s, Side c) {
     };
     return (text: text, tone: 'over');
   }
+  if (lan && s.linkLost) return (text: 'Opponent disconnected', tone: 'check');
+  if (lan && s.drawOfferOut) return (text: 'Draw offered · waiting for the answer', tone: 'think');
   if (s.thinking) return (text: 'Bot is thinking…', tone: 'think');
   if (s.check) {
-    return (text: bot ? (s.turn == human ? 'Your king is in check!' : 'Check!') : '${s.turn.label} is in check!', tone: 'check');
+    return (text: (bot || lan) ? (s.turn == human ? 'Your king is in check!' : 'Check!') : '${s.turn.label} is in check!', tone: 'check');
   }
   if (bot) return (text: s.turn == human ? 'Your move' : '…', tone: '');
+  if (lan) return (text: s.turn == human ? 'Your move' : 'Opponent is thinking…', tone: '');
   return (text: '${s.turn.label} to move', tone: '');
 }
 
@@ -64,12 +68,13 @@ class _Captured extends StatelessWidget {
 }
 
 class _PlayerCard extends StatelessWidget {
-  const _PlayerCard({required this.s, required this.side, required this.label, this.sub, this.compact = false});
+  const _PlayerCard({required this.s, required this.side, required this.label, this.sub, this.compact = false, this.showCaptured = false});
   final GameSnapshot s;
   final Side side;
   final String label;
   final String? sub;
   final bool compact;
+  final bool showCaptured;
 
   @override
   Widget build(BuildContext context) {
@@ -100,8 +105,8 @@ class _PlayerCard extends StatelessWidget {
           if (sub != null) Text(sub!, style: const TextStyle(color: C.muted, fontSize: 12)),
         ]),
         const Spacer(),
-        Flexible(child: _Captured(lost: lost, color: side.other)),
-        if (diff > 0) ...[
+        if (showCaptured) Flexible(child: _Captured(lost: lost, color: side.other)),
+        if (showCaptured && diff > 0) ...[
           const SizedBox(width: 8),
           Text('+$diff', style: const TextStyle(color: C.ok, fontWeight: FontWeight.w700, fontSize: 13)),
         ],
@@ -212,6 +217,8 @@ class Hud extends StatefulWidget {
     required this.onMenu,
     required this.onSettings,
     this.wide = false,
+    this.showMoves = false,
+    this.showCaptured = false,
   });
 
   final GameController game;
@@ -219,6 +226,7 @@ class Hud extends StatefulWidget {
   final BoardScene board;
   final VoidCallback onMenu, onSettings;
   final bool wide;
+  final bool showMoves, showCaptured;
 
   @override
   State<Hud> createState() => _HudState();
@@ -230,11 +238,12 @@ class _HudState extends State<Hud> {
   String _confirmTitle(ConfirmKind k) {
     final s = widget.snapshot;
     final bot = s.config.mode == GameMode.bot;
+    final lan = s.config.mode == GameMode.lan;
     switch (k) {
       case ConfirmKind.resign:
-        return bot ? 'Resign?' : '${s.turn.label} resigns?';
+        return (bot || lan) ? 'Resign?' : '${s.turn.label} resigns?';
       case ConfirmKind.draw:
-        return 'Both players agree to a draw?';
+        return lan ? 'Offer a draw to your opponent?' : 'Both players agree to a draw?';
       case ConfirmKind.rematch:
         return 'Start a rematch?';
     }
@@ -265,9 +274,17 @@ class _HudState extends State<Hud> {
       case ConfirmKind.resign:
         widget.game.resign();
       case ConfirmKind.draw:
-        widget.game.agreeDraw();
+        if (widget.snapshot.config.mode == GameMode.lan) {
+          widget.game.offerDraw();
+        } else {
+          widget.game.agreeDraw();
+        }
       case ConfirmKind.rematch:
-        widget.game.start(widget.snapshot.config);
+        if (widget.snapshot.config.mode == GameMode.lan) {
+          widget.game.requestRematch();
+        } else {
+          widget.game.start(widget.snapshot.config);
+        }
     }
   }
 
@@ -275,9 +292,11 @@ class _HudState extends State<Hud> {
   Widget build(BuildContext context) {
     final s = widget.snapshot;
     final bot = s.config.mode == GameMode.bot;
+    final lan = s.config.mode == GameMode.lan;
+    final mine = bot || lan; // one human side on this phone
     final human = s.config.humanColor;
-    final opp = bot ? human.other : Side.b;
-    final me = bot ? human : Side.w;
+    final opp = mine ? human.other : Side.b;
+    final me = mine ? human : Side.w;
     final st = statusText(s);
     final over = s.status != GameStatus.playing;
     // Phone held sideways: the side panel is short, so tighten everything instead of overflowing.
@@ -318,12 +337,15 @@ class _HudState extends State<Hud> {
       _PlayerCard(
         s: s,
         side: opp,
-        label: bot ? 'Bot · ${s.config.elo}' : opp.label,
-        sub: bot ? opp.label : null,
+        label: bot ? 'Bot · ${s.config.elo}' : (lan ? 'Opponent' : opp.label),
+        sub: mine ? opp.label : null,
         compact: compact,
+        showCaptured: widget.showCaptured,
       ),
-      SizedBox(height: gap),
-      if (widget.wide) Flexible(child: _MoveList(history: s.history, vertical: true, compact: compact)) else _MoveList(history: s.history, vertical: false),
+      if (widget.showMoves) ...[
+        SizedBox(height: gap),
+        if (widget.wide) Flexible(child: _MoveList(history: s.history, vertical: true, compact: compact)) else _MoveList(history: s.history, vertical: false),
+      ],
     ]);
 
     final controls = Row(children: [
@@ -349,11 +371,17 @@ class _HudState extends State<Hud> {
           label: 'Reset',
           onPressed: () {
             setState(() => topView = false);
-            widget.board.resetCamera(animate: true, side: bot ? human : widget.board.viewSide());
+            widget.board.resetCamera(animate: true, side: mine ? human : widget.board.viewSide());
           },
         ),
         if (over)
-          _CtrlButton(compact: compact, key: const Key('btn-rematch'), icon: '♻', label: 'Rematch', onPressed: () => _confirm(ConfirmKind.rematch))
+          _CtrlButton(
+            compact: compact,
+            key: const Key('btn-rematch'),
+            icon: '♻',
+            label: s.rematchWaiting ? 'Waiting…' : 'Rematch',
+            onPressed: (s.rematchWaiting || (lan && s.linkLost)) ? null : () => _confirm(ConfirmKind.rematch),
+          )
         else if (bot)
           _CtrlButton(compact: compact, key: const Key('btn-resign'), icon: '⚑', label: 'Resign', onPressed: () => _confirm(ConfirmKind.resign))
         else ...[
@@ -365,7 +393,7 @@ class _HudState extends State<Hud> {
     ]);
 
     final bottom = Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      _PlayerCard(s: s, side: me, label: bot ? 'You' : me.label, sub: bot ? me.label : null, compact: compact),
+      _PlayerCard(s: s, side: me, label: mine ? 'You' : me.label, sub: mine ? me.label : null, compact: compact, showCaptured: widget.showCaptured),
       SizedBox(height: gap),
       controls,
     ]);

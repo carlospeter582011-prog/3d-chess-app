@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import '../chess/rules.dart';
 import '../chess/types.dart';
 import '../chess/uci_engine.dart';
+import '../net/lan.dart';
 import '../scene/board_scene.dart';
 import 'settings.dart';
 import 'storage.dart';
@@ -43,6 +44,15 @@ class GameSnapshot {
   final bool canUndo;
   final bool engineError;
 
+  /// Two-phone games: the connection to the other phone was lost.
+  final bool linkLost;
+
+  /// Two-phone games: the other player offered a draw / we offered one and wait for the answer.
+  final bool drawOfferIn, drawOfferOut;
+
+  /// Two-phone games: we asked for a rematch and wait for the other player.
+  final bool rematchWaiting;
+
   const GameSnapshot({
     required this.version,
     required this.active,
@@ -61,6 +71,10 @@ class GameSnapshot {
     required this.captured,
     required this.canUndo,
     required this.engineError,
+    this.linkLost = false,
+    this.drawOfferIn = false,
+    this.drawOfferOut = false,
+    this.rematchWaiting = false,
   });
 }
 
@@ -107,6 +121,15 @@ class GameController extends ChangeNotifier {
   bool autoFlip = false;
   bool _disposed = false;
 
+  // two-phone games
+  RemoteLink? _link;
+  StreamSubscription<Map<String, dynamic>>? _linkSub;
+  bool _isHost = false;
+  bool _linkLost = false;
+  bool _drawIn = false, _drawOut = false;
+  bool _rematchMine = false, _rematchTheirs = false;
+  bool get _lan => config.mode == GameMode.lan;
+
   GameSnapshot get snapshot => _snap;
   bool get isBusy => _busy;
 
@@ -136,8 +159,12 @@ class GameController extends ChangeNotifier {
       selected: _selected,
       promotion: _promotion,
       captured: captured,
-      canUndo: hist.isNotEmpty && !_busy && st.status != GameStatus.resigned,
+      canUndo: hist.isNotEmpty && !_busy && st.status != GameStatus.resigned && !_lan,
       engineError: _engineError,
+      linkLost: _linkLost,
+      drawOfferIn: _drawIn,
+      drawOfferOut: _drawOut,
+      rematchWaiting: _rematchMine && !_rematchTheirs,
     );
     notifyListeners();
   }
@@ -173,6 +200,8 @@ class GameController extends ChangeNotifier {
   /// Starts a new game, optionally resuming from a list of UCI moves.
   void start(GameConfig cfg, {List<String> moves = const []}) {
     _cancelThinking();
+    if (cfg.mode != GameMode.lan) _dropLink();
+    _drawIn = _drawOut = _rematchMine = _rematchTheirs = false;
     config = cfg;
     chess = Chess();
     if (moves.isNotEmpty) {
@@ -191,7 +220,7 @@ class GameController extends ChangeNotifier {
     _active = true;
     engine.resetGame();
     syncBoard();
-    final side = cfg.mode == GameMode.bot ? cfg.humanColor : chess.turn;
+    final side = cfg.mode == GameMode.local ? chess.turn : cfg.humanColor;
     board.setAutoRotate(false);
     board.resetCamera(animate: true, side: side);
     _refresh();
@@ -202,6 +231,20 @@ class GameController extends ChangeNotifier {
   /// Back to the menu without losing the game.
   void leave() {
     _cancelThinking();
+    if (_lan) {
+      // a two-phone game cannot be paused: leaving closes the connection and clears the board
+      _dropLink();
+      chess = Chess();
+      config = const GameConfig();
+      _resigned = null;
+      _agreedDraw = false;
+      _selected = null;
+      _promotion = null;
+      _busy = false;
+      _linkLost = false;
+      _drawIn = _drawOut = _rematchMine = _rematchTheirs = false;
+      syncBoard();
+    }
     _active = false;
     _refresh();
   }
@@ -215,6 +258,7 @@ class GameController extends ChangeNotifier {
   // ------------------------------------------------------------------ persistence
   void _save() {
     try {
+      if (_lan) return; // two-phone games are not saved
       if (chess.history.isEmpty && !_active) return;
       if (computeStatus().status != GameStatus.playing) {
         store.remove(saveKey);
@@ -253,7 +297,11 @@ class GameController extends ChangeNotifier {
   }
 
   // ------------------------------------------------------------------ input
-  bool _isHumanTurn() => config.mode == GameMode.local || chess.turn == config.humanColor;
+  bool _isHumanTurn() {
+    if (config.mode == GameMode.local) return true;
+    if (_lan && _linkLost) return false;
+    return chess.turn == config.humanColor;
+  }
 
   List<Move> legalFrom(String sq) => chess.legalMoves(from: sq);
 
@@ -343,7 +391,7 @@ class GameController extends ChangeNotifier {
   }
 
   // ------------------------------------------------------------------ moves
-  Future<Move?> playMove(String from, String to, [PT? promotion]) async {
+  Future<Move?> playMove(String from, String to, [PT? promotion, bool fromRemote = false]) async {
     _busy = true;
     _selected = null;
     final mv = chess.move(from, to, promotion?.ch);
@@ -353,6 +401,8 @@ class GameController extends ChangeNotifier {
       _refresh();
       return null;
     }
+    if (_lan && !fromRemote) _link?.send({'t': 'move', 'uci': mv.uci});
+    _drawIn = _drawOut = false; // a pending draw offer lapses once a move is played
     board.setMarkers(MarkerSet(last: (mv.fromName, mv.toName)));
     _refresh();
     final rank = from[1];
@@ -440,7 +490,7 @@ class GameController extends ChangeNotifier {
 
   // ------------------------------------------------------------------ game actions
   void undo() {
-    if (_busy || chess.history.isEmpty || _resigned != null) return;
+    if (_lan || _busy || chess.history.isEmpty || _resigned != null) return;
     _cancelThinking();
     _agreedDraw = false;
     chess.undo();
@@ -459,7 +509,8 @@ class GameController extends ChangeNotifier {
   void resign() {
     if (computeStatus().status != GameStatus.playing) return;
     _cancelThinking();
-    _resigned = config.mode == GameMode.bot ? config.humanColor : chess.turn;
+    _resigned = config.mode == GameMode.local ? chess.turn : config.humanColor;
+    if (_lan) _link?.send({'t': 'resign'});
     _selected = null;
     _promotion = null;
     board.unlift();
@@ -469,16 +520,149 @@ class GameController extends ChangeNotifier {
     sfx.end();
   }
 
+  /// Draw by agreement on one device. Two-phone games go through [offerDraw] / [answerDraw].
   void agreeDraw() {
+    if (_lan) return;
+    _applyDraw();
+  }
+
+  void _applyDraw() {
     if (computeStatus().status != GameStatus.playing) return;
     _cancelThinking();
     _agreedDraw = true;
+    _drawIn = _drawOut = false;
     _selected = null;
     board.unlift();
     _updateMarkers();
     _refresh();
     _save();
     sfx.end();
+  }
+
+  // ------------------------------------------------------------------ two-phone games
+  /// Starts a two-phone game on an open connection. [mySide] is this phone's colour; the host decides the colours.
+  void startLan(RemoteLink link, Side mySide, {required bool isHost}) {
+    _dropLink();
+    _link = link;
+    _isHost = isHost;
+    _linkLost = false;
+    _linkSub = link.messages.listen(_onRemote);
+    unawaited(link.done.then((_) {
+      if (identical(_link, link)) _onLinkLost();
+    }));
+    start(GameConfig(mode: GameMode.lan, humanColor: mySide));
+  }
+
+  void _dropLink() {
+    final l = _link;
+    _link = null;
+    unawaited(_linkSub?.cancel());
+    _linkSub = null;
+    if (l != null) unawaited(l.close());
+  }
+
+  void _onLinkLost() {
+    if (_disposed) return;
+    _link = null;
+    _linkLost = true;
+    _drawIn = _drawOut = false;
+    _refresh();
+  }
+
+  void _onRemote(Map<String, dynamic> m) {
+    if (_disposed || !_lan) return;
+    switch (m['t']) {
+      case 'move':
+        final uci = m['uci'];
+        if (uci is String) unawaited(_playRemoteMove(uci));
+      case 'resign':
+        if (computeStatus().status != GameStatus.playing) return;
+        _resigned = config.humanColor.other;
+        _finishQuietly();
+      case 'draw':
+        switch (m['a']) {
+          case 'offer':
+            if (computeStatus().status == GameStatus.playing) {
+              _drawIn = true;
+              _refresh();
+            }
+          case 'accept':
+            if (_drawOut) _applyDraw();
+          case 'decline':
+            _drawOut = false;
+            _refresh();
+        }
+      case 'rematch':
+        _rematchTheirs = true;
+        _refresh();
+        _maybeRematch();
+      case 'start':
+        final you = m['you'];
+        if (!_isHost && (you == 'w' || you == 'b')) start(GameConfig(mode: GameMode.lan, humanColor: sideFromChar(you as String)));
+    }
+  }
+
+  /// The other player's move. Only a legal move for the side to move is ever played.
+  Future<void> _playRemoteMove(String uci) async {
+    for (var i = 0; i < 100 && _busy; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    if (_disposed || !_lan || _linkLost) return;
+    if (computeStatus().status != GameStatus.playing || chess.turn == config.humanColor) return;
+    for (final m in chess.legalMoves()) {
+      if (m.uci == uci) {
+        await playMove(m.fromName, m.toName, m.promotion, true);
+        return;
+      }
+    }
+    debugPrint('ignored an illegal remote move: $uci');
+  }
+
+  void _finishQuietly() {
+    _cancelThinking();
+    _selected = null;
+    _promotion = null;
+    _drawIn = _drawOut = false;
+    board.unlift();
+    _updateMarkers();
+    _refresh();
+    _save();
+    sfx.end();
+  }
+
+  /// Asks the other player for a draw (two-phone games).
+  void offerDraw() {
+    if (!_lan || _linkLost || _drawOut || computeStatus().status != GameStatus.playing) return;
+    _drawOut = true;
+    _link?.send({'t': 'draw', 'a': 'offer'});
+    _refresh();
+  }
+
+  void answerDraw(bool accept) {
+    if (!_lan || !_drawIn) return;
+    _drawIn = false;
+    _link?.send({'t': 'draw', 'a': accept ? 'accept' : 'decline'});
+    if (accept) {
+      _applyDraw();
+    } else {
+      _refresh();
+    }
+  }
+
+  /// Both players must ask; then the host starts the next game with the colours swapped.
+  void requestRematch() {
+    if (!_lan || _linkLost || _rematchMine) return;
+    _rematchMine = true;
+    _link?.send({'t': 'rematch'});
+    _refresh();
+    _maybeRematch();
+  }
+
+  void _maybeRematch() {
+    if (!(_rematchMine && _rematchTheirs && _isHost && _link != null)) return;
+    final guestNew = config.humanColor; // the host's old colour goes to the guest
+    _link!.send({'t': 'start', 'you': guestNew.ch});
+    start(GameConfig(mode: GameMode.lan, humanColor: config.humanColor.other));
   }
 
   /// Developer / test hook: jump to an arbitrary position.
@@ -497,6 +681,7 @@ class GameController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _dropLink();
     _epoch++;
     engine.dispose();
     super.dispose();

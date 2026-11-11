@@ -18,7 +18,7 @@ class _Fly {
 
 class OrbitCamera {
   static const double minDistance = 5;
-  static const double maxDistance = 40;
+  static const double maxDistance = 32; // far enough to see the whole table, never loses the board
   static const double minPolar = 0.02;
   static final double maxPolar = math.pi * 0.49; // never go below the table
   static const double damping = 0.09;
@@ -148,6 +148,17 @@ class OrbitCamera {
     _fly = null;
   }
 
+  /// Finger lifted while still moving at ([vx], [vy]) logical px/s: the view keeps gliding for a moment (inertia)
+  /// instead of stopping dead. The extra rotation is spread over the damping, about half a second.
+  void fling(double vx, double vy) {
+    const glide = 0.2; // seconds of the release velocity that carry on
+    final h = math.max(1.0, viewHeight);
+    final cap = 0.55 * h;
+    final dx = clampD(vx * glide, -cap, cap), dy = clampD(vy * glide, -cap, cap);
+    _dTheta -= 2 * math.pi * dx / h * rotateSpeed;
+    _dPhi -= 2 * math.pi * dy / h * rotateSpeed;
+  }
+
   /// Two-finger drag by (dx, dy) logical pixels: slides the view over the table.
   void panByPixels(double dx, double dy) {
     final h = math.max(1.0, viewHeight);
@@ -217,12 +228,15 @@ class OrbitCamera {
       theta += _dTheta * k;
       phi += _dPhi * k;
       phi = clampD(phi, minPolar, maxPolar);
-      radius = clampD(radius * _scale, minDistance, maxDistance);
+      // zoom glides too: only a fraction of the requested zoom is applied each frame
+      radius = clampD(radius * math.pow(_scale, k), minDistance, maxDistance);
+      _scale = math.pow(_scale, 1 - k).toDouble();
+      if ((_scale - 1).abs() < 1e-4) _scale = 1;
+      if (radius <= minDistance + 1e-9 && _scale < 1 || radius >= maxDistance - 1e-9 && _scale > 1) _scale = 1;
       target = target + _pan * k;
       _dTheta *= (1 - k);
       _dPhi *= (1 - k);
       _pan = _pan * (1 - k);
-      _scale = 1;
     }
     _clampTarget();
 
@@ -231,7 +245,7 @@ class OrbitCamera {
   }
 
   void _clampTarget() {
-    target = V3(clampD(target.x, -6, 6), clampD(target.y, 0, 3), clampD(target.z, -6, 6));
+    target = V3(clampD(target.x, -4.5, 4.5), clampD(target.y, 0, 2.5), clampD(target.z, -4.5, 4.5));
   }
 
   // ------------------------------------------------------------------ projection / picking

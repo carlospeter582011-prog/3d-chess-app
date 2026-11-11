@@ -15,7 +15,7 @@ import sharp from 'sharp';
 import fs from 'node:fs';
 
 const [SRC, OUT] = process.argv.slice(2);
-if (!SRC || !OUT) { console.error('usage: node prepare_assets.mjs <src models dir> <out dir>'); process.exit(1); }
+if (!OUT || (!SRC && !process.env.ONLY_TABLE)) { console.error('usage: node prepare_assets.mjs <src models dir> <out dir>'); process.exit(1); }
 fs.mkdirSync(OUT, { recursive: true });
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
 
@@ -39,13 +39,14 @@ async function convert(name) {
 const srgb2lin = (c) => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
 const hexLin = (hex, a = 1) => [srgb2lin((hex >> 16) & 255), srgb2lin((hex >> 8) & 255), srgb2lin(hex & 255), a];
 
-function buildModel(name, { positions, uvs, indices, material }) {
+function buildModel(name, { positions, uvs, indices, material, normals: customNormals }) {
   const doc = new Document();
   doc.createBuffer();
   const buffer = doc.getRoot().listBuffers()[0];
   const n = positions.length / 3;
   const normals = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) normals[i * 3 + 1] = 1; // everything here is flat and faces +Y
+  if (customNormals) normals.set(customNormals);
+  else for (let i = 0; i < n; i++) normals[i * 3 + 1] = 1; // flat models face +Y
   const acc = (type, array) => doc.createAccessor().setType(type).setArray(array).setBuffer(buffer);
   const prim = doc.createPrimitive()
     .setAttribute('POSITION', acc('VEC3', new Float32Array(positions)))
@@ -103,22 +104,126 @@ function gradient(stops, t) {
   return stops[stops.length - 1][1];
 }
 
-async function tableModel() {
-  // same radial pool of light as the web version: canvas radial gradient (40px -> 512px of a 1024px canvas)
-  const stops = [[0, [0x4a, 0x38, 0x2b]], [0.12, [0x33, 0x26, 0x1c]], [0.4, [0x1d, 0x15, 0x10]], [1, [0x15, 0x11, 0x0e]]];
-  let seed = 12345; const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
-  const img = await png(1024, 1024, (x, y) => {
-    const d = Math.hypot(x - 512, y - 512), c = gradient(stops, (d - 40) / (512 - 40)), n = (rnd() - 0.5) * 2;
-    return [c[0] + n, c[1] + n, c[2] + n, 255];
+// ---- the table: a round walnut table top with a rounded edge and a pedestal, standing on a dark floor.
+// One mesh and one material (Filament loads it as a single static model), so one texture atlas holds everything:
+//   x 0..1024    table top (planks with grain, baked pool of light)
+//   x 1024..1536 edge and pedestal (darker wood, grain running around)
+//   x 1536..2048 floor (dark, with a soft contact shadow under the table)
+const TABLE_R = 9, TABLE_THICK = 0.55, FLOOR_Y = -5, FLOOR_R = 46;
+
+function makeNoise(seed) {
+  let s = seed >>> 0; const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+  const N = 256, g = Float32Array.from({ length: N * N }, rnd);
+  const at = (x, y) => g[((y & 255) * N) + (x & 255)];
+  const sm = (t) => t * t * (3 - 2 * t);
+  const value = (x, y) => {
+    const xi = Math.floor(x), yi = Math.floor(y), fx = sm(x - xi), fy = sm(y - yi);
+    return lerp(lerp(at(xi, yi), at(xi + 1, yi), fx), lerp(at(xi, yi + 1), at(xi + 1, yi + 1), fx), fy);
+  };
+  const fbm = (x, y, o = 4) => { let a = 0.5, f = 1, t = 0; for (let i = 0; i < o; i++) { t += a * value(x * f, y * f); a *= 0.5; f *= 2; } return t; };
+  return { fbm, rnd };
+}
+
+function woodColor(noise, u, v, { planks, dark }) {
+  // u runs across the planks, v along the grain; both in 0..1
+  const plank = Math.min(planks - 1, Math.floor(u * planks)), pu = u * planks - plank;
+  const shift = noise.rnd() * 0; // keep deterministic per pixel
+  const tone = 0.82 + 0.36 * (((plank * 7919) % 13) / 13); // each plank a slightly different shade
+  const warp = noise.fbm(u * 6 + plank * 3.1, v * 1.5, 3) * 5;
+  const rings = Math.sin((pu * 16 + warp + plank * 2.3) * Math.PI * 2 / 2);
+  const fine = noise.fbm(u * 90, v * 6, 3);
+  const grain = 0.5 + 0.5 * rings;
+  let t = 0.35 * grain + 0.45 * fine + 0.2 * noise.fbm(u * 14, v * 40, 2) + shift;
+  const c = gradient([[0, [0x3b, 0x24, 0x15]], [0.5, [0x6a, 0x42, 0x26]], [1, [0x93, 0x62, 0x3a]]], t);
+  const seam = Math.min(pu, 1 - pu) < 0.012 ? 0.45 : 1; // dark gap between planks
+  const k = tone * seam * (dark ? 0.62 : 1);
+  return [c[0] * k, c[1] * k, c[2] * k];
+}
+
+async function tableAtlas() {
+  const W = 2048, H = 1024, noise = makeNoise(777);
+  const img = await png(W, H, (x, y) => {
+    if (x < 1024) { // top
+      const u = x / 1024, v = y / 1024, px = (u - 0.5) * 2 * TABLE_R, pz = (v - 0.5) * 2 * TABLE_R;
+      const c = woodColor(noise, u, v, { planks: 4, dark: false });
+      const r = Math.hypot(px, pz) / TABLE_R;
+      const pool = 1.05 - 0.55 * Math.min(1, r * r * 0.9 + (r > 0.55 ? (r - 0.55) * 0.5 : 0)); // light pool in the middle
+      const n = (noise.rnd() - 0.5) * 3;
+      return [c[0] * pool + n, c[1] * pool + n, c[2] * pool + n, 255];
+    }
+    if (x < 1536) { // edge and pedestal: grain runs around, so it is stretched along u
+      const u = (x - 1024) / 512, v = y / 1024;
+      const c = woodColor(noise, v, u * 0.5, { planks: 1, dark: true });
+      return [c[0], c[1], c[2], 255];
+    }
+    // floor: centre of this tile is under the table
+    const dx = ((x - 1536) / 512 - 0.5) * 2, dy = (y / 1024 - 0.5) * 2, d = Math.hypot(dx, dy);
+    const shadow = gradient([[0, [0x04, 0x03, 0x02]], [0.2, [0x06, 0x05, 0x04]], [0.45, [0x12, 0x0e, 0x0b]], [1, [0x15, 0x11, 0x0e]]], d / 1);
+    const n = (noise.rnd() - 0.5) * 2;
+    return [shadow[0] + n, shadow[1] + n, shadow[2] + n, 255];
   });
-  const jpg = await img.jpeg({ quality: 92 }).toBuffer();
-  const g = disc(90, 64, 1);
+  return img.jpeg({ quality: 93 }).toBuffer();
+}
+
+function tableGeometry() {
+  const P = [], N = [], T = [], I = [];
+  const SEG = 96;
+  const vert = (p, n, uv) => { P.push(...p); N.push(...n); T.push(...uv); return P.length / 3 - 1; };
+  // top
+  const RR = 0.28, TOP_R = TABLE_R - RR; // the flat top ends where the rounded edge begins
+  let c = vert([0, 0, 0], [0, 1, 0], [0.25, 0.5]);
+  const top0 = P.length / 3;
+  for (let i = 0; i <= SEG; i++) {
+    const a = (i / SEG) * Math.PI * 2, x = Math.cos(a) * TOP_R, z = Math.sin(a) * TOP_R;
+    vert([x, 0, z], [0, 1, 0], [0.5 * (0.5 + x / (2 * TABLE_R)), 0.5 + z / (2 * TABLE_R)]);
+  }
+  for (let i = 0; i < SEG; i++) I.push(c, top0 + i + 1, top0 + i);
+  // rounded edge: quarter circle from the top going down, then straight side to the underside
+  const prof = []; // [radius, y, nx, ny]
+  for (let k = 0; k <= 5; k++) { const t = (k / 5) * Math.PI / 2; prof.push([TABLE_R - RR + Math.sin(t) * RR, -RR + Math.cos(t) * RR, Math.sin(t), Math.cos(t)]); }
+  prof.push([TABLE_R, -TABLE_THICK, 1, 0]);
+  prof[0] = [TABLE_R - RR, 0, 0, 1];
+  const ringStart = [];
+  prof.forEach(([r, y, nx, ny], j) => {
+    ringStart.push(P.length / 3);
+    for (let i = 0; i <= SEG; i++) {
+      const a = (i / SEG) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+      vert([ca * r, y, sa * r], [ca * nx, ny, sa * nx], [0.5 + 0.25 * (i / SEG), 1 - (j / (prof.length - 1)) * 0.6]);
+    }
+  });
+  for (let j = 0; j < prof.length - 1; j++) for (let i = 0; i < SEG; i++) {
+    const a = ringStart[j] + i, b = ringStart[j + 1] + i;
+    I.push(a, a + 1, b, a + 1, b + 1, b);
+  }
+  // pedestal
+  const PR = 1.1, y0 = -TABLE_THICK, y1 = FLOOR_Y;
+  const pBase = P.length / 3;
+  for (let i = 0; i <= SEG; i++) {
+    const a = (i / SEG) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+    vert([ca * PR, y0, sa * PR], [ca, 0, sa], [0.5 + 0.25 * (i / SEG), 0.3]);
+    vert([ca * PR, y1, sa * PR], [ca, 0, sa], [0.5 + 0.25 * (i / SEG), 0.9]);
+  }
+  for (let i = 0; i < SEG; i++) { const a = pBase + i * 2; I.push(a, a + 1, a + 2, a + 2, a + 1, a + 3); }
+  // floor
+  const fc = vert([0, FLOOR_Y, 0], [0, 1, 0], [0.875, 0.5]);
+  const f0 = P.length / 3;
+  for (let i = 0; i <= SEG; i++) {
+    const a = (i / SEG) * Math.PI * 2, x = Math.cos(a) * FLOOR_R, z = Math.sin(a) * FLOOR_R;
+    vert([x, FLOOR_Y, z], [0, 1, 0], [0.875 + 0.115 * Math.cos(a), 0.5 + 0.49 * Math.sin(a)]);
+  }
+  for (let i = 0; i < SEG; i++) I.push(fc, f0 + i + 1, f0 + i);
+  return { positions: P, normals: N, uvs: T, indices: I };
+}
+
+async function tableModel() {
+  const jpg = await tableAtlas();
+  const g = tableGeometry();
   const doc = buildModel('table', {
     ...g,
     material: (d) => {
       const tex = d.createTexture('table').setImage(new Uint8Array(jpg)).setMimeType('image/jpeg');
-      return d.createMaterial('table').setBaseColorTexture(tex).setBaseColorFactor([srgb2lin(0xb0), srgb2lin(0xa0), srgb2lin(0x90), 1])
-        .setRoughnessFactor(0.95).setMetallicFactor(0).setDoubleSided(true);
+      return d.createMaterial('table').setBaseColorTexture(tex).setBaseColorFactor([srgb2lin(0xd8), srgb2lin(0xd0), srgb2lin(0xc8), 1])
+        .setRoughnessFactor(0.55).setMetallicFactor(0).setDoubleSided(true);
     },
   });
   await io.write(`${OUT}/table.glb`, doc);
@@ -143,8 +248,9 @@ async function checkModel() {
 }
 
 let total = 0;
-for (const f of FILES) { const sz = await convert(f); total += sz; console.log(f.padEnd(14), (sz / 1e6).toFixed(2), 'MB'); }
+if (!process.env.ONLY_TABLE) for (const f of FILES) { const sz = await convert(f); total += sz; console.log(f.padEnd(14), (sz / 1e6).toFixed(2), 'MB'); }
 await tableModel();
+if (process.env.ONLY_TABLE) process.exit(0);
 await checkModel();
 await io.write(`${OUT}/marker_sel.glb`, buildModel('marker_sel', { ...quad(0.49), material: unlitMat(0x4fd18b, 0.55) }));
 await io.write(`${OUT}/marker_last.glb`, buildModel('marker_last', { ...quad(0.49), material: unlitMat(0xf3c64a, 0.42) }));
