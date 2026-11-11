@@ -200,20 +200,20 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     };
     GameController.clearSaved(d.store);
     saved = null;
-    game.start(GameConfig(mode: s.mode, humanColor: human, elo: s.elo));
+    game.start(GameConfig(mode: s.mode, humanColor: human, elo: s.elo, timeSec: s.timeMin * 60, incSec: s.incSec));
   }
 
-  void _startLan(RemoteLink link, Side mySide, bool isHost) {
+  void _startLan(RemoteLink link, Side mySide, bool isHost, int timeSec, int incSec) {
     GameController.clearSaved(d.store);
     saved = null;
     setState(() => _lobbyHost = null);
-    game.startLan(link, mySide, isHost: isHost);
+    game.startLan(link, mySide, isHost: isHost, timeSec: timeSec, incSec: incSec);
   }
 
   void _resumeSaved() {
     final sv = saved;
     if (sv == null) return;
-    game.start(sv.config, moves: sv.moves);
+    game.start(sv.config, moves: sv.moves, whiteMs: sv.whiteMs, blackMs: sv.blackMs);
   }
 
   void _openSettings() {
@@ -272,6 +272,8 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
                 host: _lobbyHost!,
                 services: d.lan,
                 onStart: _startLan,
+                timeSec: settings.timeMin * 60,
+                incSec: settings.incSec,
                 onCancel: () => setState(() => _lobbyHost = null),
               ),
             ),

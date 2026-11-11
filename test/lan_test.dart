@@ -23,7 +23,8 @@ class _NoEngine implements BotEngine {
   void dispose() {}
 }
 
-GameController newGame() => GameController(
+GameController newGame([DateTime Function()? now]) => GameController(
+      now: now,
       board: BoardModel()..animations = false,
       engine: _NoEngine(),
       store: MemoryStore(),
@@ -254,6 +255,139 @@ void main() {
       expect(hl.isOpen, isFalse);
       expect(gl.isOpen, isFalse);
       h.dispose();
+    });
+  });
+
+  group('chess clock', () {
+    late DateTime t0;
+    late DateTime now;
+    setUp(() {
+      t0 = DateTime(2026, 1, 1);
+      now = t0;
+    });
+    void advance(int sec) => now = now.add(Duration(seconds: sec));
+
+    GameController timedLocal({int sec = 60, int inc = 0}) {
+      final g = newGame(() => now);
+      g.start(GameConfig(mode: GameMode.local, timeSec: sec, incSec: inc));
+      return g;
+    }
+
+    test('no clock when the game is untimed', () {
+      final g = newGame(() => now);
+      g.start(const GameConfig(mode: GameMode.local));
+      expect(g.snapshot.config.timed, isFalse);
+      advance(500);
+      g.debugTickClock();
+      expect(g.snapshot.status, GameStatus.playing);
+      g.dispose();
+    });
+
+    test('the clock starts after the first move, then charges the side to move', () async {
+      final g = timedLocal(sec: 60, inc: 2);
+      advance(30);
+      g.debugTickClock();
+      expect(g.snapshot.whiteMs, 60000); // nothing runs before the first move
+      g.tap('e2');
+      g.tap('e4');
+      await settle();
+      expect(g.snapshot.whiteMs, 62000); // +2 s increment
+      advance(10);
+      g.debugTickClock();
+      expect(g.snapshot.blackMs, 50000);
+      expect(g.snapshot.whiteMs, 62000);
+      g.dispose();
+    });
+
+    test('running out of time loses the game', () async {
+      final g = timedLocal(sec: 60);
+      g.tap('e2');
+      g.tap('e4');
+      await settle();
+      advance(61);
+      g.debugTickClock();
+      expect(g.snapshot.status, GameStatus.resigned);
+      expect(g.snapshot.reason, 'Black ran out of time');
+      expect(g.snapshot.winner, Side.w);
+      expect(g.snapshot.blackMs, 0);
+      // no more moves after the flag fell
+      g.tap('e7');
+      g.tap('e5');
+      await settle();
+      expect(g.snapshot.history.length, 1);
+      g.dispose();
+    });
+
+    test('leaving the game to the menu pauses the clock', () async {
+      final g = timedLocal(sec: 60);
+      g.tap('e2');
+      g.tap('e4');
+      await settle();
+      advance(5);
+      g.leave();
+      advance(100);
+      g.resume();
+      advance(5);
+      g.debugTickClock();
+      expect(g.snapshot.blackMs, 50000);
+      expect(g.snapshot.status, GameStatus.playing);
+      g.dispose();
+    });
+
+    test('a saved timed game comes back with its clock', () async {
+      final store = MemoryStore();
+      final g = GameController(board: BoardModel()..animations = false, engine: _NoEngine(), store: store, sfx: SilentSfx(), thinkMinimum: Duration.zero, now: () => now);
+      g.start(const GameConfig(mode: GameMode.local, timeSec: 120, incSec: 1));
+      g.tap('d2');
+      g.tap('d4');
+      await settle();
+      advance(7);
+      g.leave();
+      final saved = GameController.loadSaved(store)!;
+      expect(saved.config.timeSec, 120);
+      expect(saved.config.incSec, 1);
+      expect(saved.whiteMs, 121000);
+      expect(saved.blackMs, 120000);
+      g.dispose();
+    });
+
+    test('two phones: only the phone whose own clock ran out declares it, and both agree', () async {
+      final (hl, gl) = _FakeLink.pair();
+      final h = newGame(() => now), g = newGame(() => now);
+      h.startLan(hl, Side.w, isHost: true, timeSec: 60);
+      g.startLan(gl, Side.b, isHost: false, timeSec: 60);
+      h.tap('e2');
+      h.tap('e4');
+      await settle();
+      advance(61);
+      h.debugTickClock(); // the host only estimates Black's clock: it must not end the game by itself
+      expect(h.snapshot.status, GameStatus.playing);
+      g.debugTickClock(); // Black's own phone sees its clock empty and says so
+      await settle();
+      expect(g.snapshot.status, GameStatus.resigned);
+      expect(h.snapshot.status, GameStatus.resigned);
+      expect(h.snapshot.winner, Side.w);
+      expect(h.snapshot.reason, 'Black ran out of time');
+      h.dispose();
+      g.dispose();
+    });
+
+    test('a rematch keeps the clock settings', () async {
+      final (hl, gl) = _FakeLink.pair();
+      final h = newGame(() => now), g = newGame(() => now);
+      h.startLan(hl, Side.w, isHost: true, timeSec: 180, incSec: 2);
+      g.startLan(gl, Side.b, isHost: false, timeSec: 180, incSec: 2);
+      h.resign();
+      await settle();
+      h.requestRematch();
+      g.requestRematch();
+      await settle();
+      expect(h.snapshot.config.timeSec, 180);
+      expect(g.snapshot.config.timeSec, 180);
+      expect(g.snapshot.config.incSec, 2);
+      expect(g.snapshot.whiteMs, 180000);
+      h.dispose();
+      g.dispose();
     });
   });
 }

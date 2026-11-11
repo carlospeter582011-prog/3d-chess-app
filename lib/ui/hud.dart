@@ -105,12 +105,52 @@ class _PlayerCard extends StatelessWidget {
           if (sub != null) Text(sub!, style: const TextStyle(color: C.muted, fontSize: 12)),
         ]),
         const Spacer(),
+        if (s.config.timed) _Clock(ms: side == Side.w ? s.whiteMs : s.blackMs, running: active && s.history.isNotEmpty, side: side),
+        if (s.config.timed && showCaptured) const SizedBox(width: 8),
         if (showCaptured) Flexible(child: _Captured(lost: lost, color: side.other)),
         if (showCaptured && diff > 0) ...[
           const SizedBox(width: 8),
           Text('+$diff', style: const TextStyle(color: C.ok, fontWeight: FontWeight.w700, fontSize: 13)),
         ],
       ]),
+    );
+  }
+}
+
+/// "m:ss" (or "h:mm:ss"), rounding up so the clock never shows 0:00 before it has really run out.
+String formatClock(int ms) {
+  final t = (ms + 999) ~/ 1000;
+  final h = t ~/ 3600, m = (t % 3600) ~/ 60, s = t % 60;
+  final ss = s.toString().padLeft(2, '0');
+  return h > 0 ? '$h:${m.toString().padLeft(2, '0')}:$ss' : '$m:$ss';
+}
+
+class _Clock extends StatelessWidget {
+  const _Clock({required this.ms, required this.running, required this.side});
+  final int ms;
+  final bool running;
+  final Side side;
+
+  @override
+  Widget build(BuildContext context) {
+    final low = ms <= 20000;
+    return Container(
+      key: Key('clock-${side.ch}'),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: running ? (low ? const Color(0xFF7A1F1A) : const Color(0xFF3A2D1E)) : const Color(0xFF17110E),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: running ? C.gold : C.line),
+      ),
+      child: Text(
+        formatClock(ms),
+        style: TextStyle(
+          fontWeight: FontWeight.w800,
+          fontSize: 16,
+          fontFeatures: const [FontFeature.tabularFigures()],
+          color: low && ms > 0 ? const Color(0xFFFF8A80) : Colors.white,
+        ),
+      ),
     );
   }
 }

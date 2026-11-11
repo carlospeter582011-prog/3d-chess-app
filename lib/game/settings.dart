@@ -37,24 +37,31 @@ class GameConfig {
   final GameMode mode;
   final Side humanColor;
   final int elo;
-  const GameConfig({this.mode = GameMode.bot, this.humanColor = Side.w, this.elo = 1200});
 
-  Map<String, Object> toJson() => {'mode': mode.name, 'humanColor': humanColor.ch, 'elo': elo};
+  /// Chess clock: time per player in seconds (0 = no clock) and the seconds added after each move.
+  final int timeSec, incSec;
+  const GameConfig({this.mode = GameMode.bot, this.humanColor = Side.w, this.elo = 1200, this.timeSec = 0, this.incSec = 0});
+
+  bool get timed => timeSec > 0;
+
+  Map<String, Object> toJson() => {'mode': mode.name, 'humanColor': humanColor.ch, 'elo': elo, 'time': timeSec, 'inc': incSec};
 
   static GameConfig? fromJson(Object? j) {
     if (j is! Map) return null;
     final mode = j['mode'] == 'local' ? GameMode.local : (j['mode'] == 'lan' ? GameMode.lan : GameMode.bot);
     final human = j['humanColor'] == 'b' ? Side.b : Side.w;
     final elo = j['elo'] is num ? (j['elo'] as num).round() : 1200;
-    return GameConfig(mode: mode, humanColor: human, elo: elo);
+    final time = j['time'] is num ? (j['time'] as num).round().clamp(0, 3 * 3600) : 0;
+    final inc = j['inc'] is num ? (j['inc'] as num).round().clamp(0, 60) : 0;
+    return GameConfig(mode: mode, humanColor: human, elo: elo, timeSec: time, incSec: inc);
   }
 
   @override
   bool operator ==(Object other) =>
-      other is GameConfig && other.mode == mode && other.humanColor == humanColor && other.elo == elo;
+      other is GameConfig && other.mode == mode && other.humanColor == humanColor && other.elo == elo && other.timeSec == timeSec && other.incSec == incSec;
 
   @override
-  int get hashCode => Object.hash(mode, humanColor, elo);
+  int get hashCode => Object.hash(mode, humanColor, elo, timeSec, incSec);
 }
 
 class Settings {
@@ -70,6 +77,9 @@ class Settings {
   final HumanColor humanColor;
   final GameMode mode;
 
+  /// Chess clock for new games: minutes per player (0 = off) and increment in seconds.
+  final int timeMin, incSec;
+
   const Settings({
     this.sound = true,
     this.labels = true,
@@ -80,6 +90,8 @@ class Settings {
     this.elo = 1200,
     this.humanColor = HumanColor.white,
     this.mode = GameMode.bot,
+    this.timeMin = 0,
+    this.incSec = 0,
   });
 
   Settings copyWith({
@@ -92,6 +104,8 @@ class Settings {
     int? elo,
     HumanColor? humanColor,
     GameMode? mode,
+    int? timeMin,
+    int? incSec,
   }) =>
       Settings(
         sound: sound ?? this.sound,
@@ -103,6 +117,8 @@ class Settings {
         elo: elo ?? this.elo,
         humanColor: humanColor ?? this.humanColor,
         mode: mode ?? this.mode,
+        timeMin: timeMin ?? this.timeMin,
+        incSec: incSec ?? this.incSec,
       );
 
   String encode() => jsonEncode({
@@ -115,6 +131,8 @@ class Settings {
         'elo': elo,
         'humanColor': humanColor.name,
         'mode': mode.name,
+        'timeMin': timeMin,
+        'incSec': incSec,
       });
 
   /// Tolerant decoding: anything missing or malformed falls back to the default.
@@ -140,6 +158,8 @@ class Settings {
         elo: j['elo'] is num ? (j['elo'] as num).round().clamp(400, 3200) : 1200,
         humanColor: pick(HumanColor.values, j['humanColor'], HumanColor.white),
         mode: pick(GameMode.values, j['mode'], GameMode.bot),
+        timeMin: j['timeMin'] is num ? (j['timeMin'] as num).round().clamp(0, 180) : 0,
+        incSec: j['incSec'] is num ? (j['incSec'] as num).round().clamp(0, 60) : 0,
       );
     } catch (_) {
       return const Settings();
