@@ -40,12 +40,16 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.50.0'
           cache: true
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
+      - name: Install Android SDK 37.2
+        run: sdkmanager --install 'platforms;android-37.2' 'build-tools;37.0.0'
 
       - name: Restore release keystore (only when the secret exists)
         if: env.HAS_RELEASE_KEY == 'true'
@@ -73,6 +77,28 @@ jobs:
           unzip -l dist/chess3d-release.apk | grep -E "flutter_assets/assets/models/(labels|board)\.glb"
           unzip -l dist/chess3d-release.aab | grep -E "flutter_assets/assets/models/labels\.glb"
           ls -la dist
+
+      - name: Verify Android SDK levels and 16 KB native library alignment
+        run: |
+          set -euo pipefail
+          tools="$ANDROID_HOME/build-tools/37.0.0"
+          badging=$("$tools/aapt2" dump badging dist/chess3d-release.apk)
+          grep -Fx "sdkVersion:'23'" <<< "$badging"
+          grep -Fx "targetSdkVersion:'37'" <<< "$badging"
+          "$tools/zipalign" -c -P 16 4 dist/chess3d-release.apk
+          native_dir=$(mktemp -d)
+          trap 'rm -rf "$native_dir"' EXIT
+          unzip -q dist/chess3d-release.aab 'base/lib/arm64-v8a/*.so' -d "$native_dir"
+          for library in "$native_dir"/base/lib/arm64-v8a/*.so; do
+            segments=$(readelf -lW "$library" | awk '$1 == "LOAD" {print $NF}')
+            test -n "$segments"
+            while read -r alignment; do
+              if (( alignment < 0x4000 )); then
+                echo "::error::$(basename "$library") has a LOAD segment aligned to $alignment, below 16 KB"
+                exit 1
+              fi
+            done <<< "$segments"
+          done
 
       - name: Upload APK and AAB
         uses: actions/upload-artifact@v4

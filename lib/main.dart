@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'app.dart';
 import 'chess/uci_engine.dart';
+import 'net/lan.dart';
 import 'platform/native_services.dart';
 import 'platform/stockfish_transport.dart';
 import 'scene/board_model.dart';
@@ -30,6 +31,7 @@ Future<void> main() async {
       engine: UciEngine(StockfishTransport()),
       store: store,
       sfx: sfx,
+      lan: const LanServices(requestPermission: requestLocalNetworkPermission),
       autoQuality: await detectDeviceQuality(),
       showIntro: true,
     ),

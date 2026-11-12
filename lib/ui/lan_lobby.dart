@@ -55,7 +55,24 @@ class _LanLobbyState extends State<LanLobby> {
   @override
   void initState() {
     super.initState();
-    widget.host ? _startHosting() : _startScanning();
+    unawaited(_openLobby());
+  }
+
+  Future<void> _openLobby() async {
+    bool allowed;
+    try {
+      allowed = await widget.services.requestPermission();
+    } catch (_) {
+      allowed = false;
+    }
+    if (!mounted) return;
+    if (!allowed) {
+      setState(() {
+        _error = 'Allow local network access in Android settings to play on Wi-Fi.';
+      });
+      return;
+    }
+    await (widget.host ? _startHosting() : _startScanning());
   }
 
   Future<void> _startHosting() async {
@@ -218,7 +235,8 @@ class _LanLobbyState extends State<LanLobby> {
                   const SizedBox(height: 6),
                   const Text('Both phones must be on the same Wi-Fi, or one phone\'s mobile hotspot.', style: TextStyle(color: C.muted, fontSize: 13.5, height: 1.4)),
                   const SizedBox(height: 16),
-                  ...(widget.host ? _hostBody() : _joinBody()),
+                  if (_error == null || _host != null || _scanner != null)
+                    ...(widget.host ? _hostBody() : _joinBody()),
                   if (_error != null) ...[
                     const SizedBox(height: 12),
                     Text(_error!, key: const Key('lan-error'), style: const TextStyle(color: Color(0xFFFF8A80), fontSize: 14)),

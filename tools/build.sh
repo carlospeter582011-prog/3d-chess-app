@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the 3D Chess APK and Android App Bundle (AAB) from this source tree.
-# Needs: Flutter (stable, Dart >= 3.3), JDK 17, Android SDK (platform 36 + NDK, installed automatically by Gradle),
+# Needs: Flutter 3.50.0, JDK 17, Android SDK (platform 37.2, Build Tools 37.0.0, and the NDK),
 # internet access to pub.dev, Google Maven and Maven Central. Run from anywhere:
 #
 #   tools/build.sh                 # analyze + tests + release APK + AAB -> dist/
