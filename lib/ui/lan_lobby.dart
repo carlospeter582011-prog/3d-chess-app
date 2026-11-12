@@ -49,7 +49,6 @@ class _LanLobbyState extends State<LanLobby> {
   StreamSubscription<Map<String, dynamic>>? _linkSub;
   String? _error;
   bool _handedOver = false;
-  LanAdvert? _ad;
 
   String get _me => widget.playerName.trim().isEmpty ? 'Player' : widget.playerName.trim();
 
@@ -128,7 +127,6 @@ class _LanLobbyState extends State<LanLobby> {
       _error = null;
     });
     try {
-      _ad = ad;
       final link = await widget.services.join(ad, _me);
       if (!mounted) {
         unawaited(link.close());

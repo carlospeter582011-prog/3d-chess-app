@@ -236,7 +236,7 @@ class LanHost {
     for (final (from, to) in await _routes()) {
       try {
         // one socket per local address, so the packet leaves through that network (Wi-Fi / hotspot), not mobile data
-        final sock = _senders['${from.address}'] ??= (await RawDatagramSocket.bind(from, 0))..broadcastEnabled = true;
+        final sock = _senders[from.address] ??= (await RawDatagramSocket.bind(from, 0))..broadcastEnabled = true;
         sock.send(payload, to, discoveryPort);
       } catch (_) {
         // an interface without broadcast support is skipped

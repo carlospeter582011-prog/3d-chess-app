@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../chess/elo.dart';
+import '../chess/types.dart';
 import '../game/game_controller.dart';
 import '../game/settings.dart';
 import 'theme.dart';

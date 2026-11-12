@@ -34,7 +34,7 @@ GameController newGame() => GameController(
 
 Widget host(Widget child) => MaterialApp(theme: buildTheme(), home: Scaffold(body: child));
 
-bool tester_noOverflow(WidgetTester t) => t.takeException() == null;
+bool noOverflow(WidgetTester t) => t.takeException() == null;
 
 void useTallScreen(WidgetTester t) {
   t.view.physicalSize = const Size(450, 1000);
@@ -439,7 +439,7 @@ void main() {
       for (final label in ['Rematch', 'View board', 'Menu']) {
         expect(find.textContaining(label), findsOneWidget);
       }
-      expect(tester_noOverflow(t), isTrue);
+      expect(noOverflow(t), isTrue);
     });
   });
 }

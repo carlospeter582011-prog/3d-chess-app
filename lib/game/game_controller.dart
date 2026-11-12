@@ -158,7 +158,7 @@ class GameController extends ChangeNotifier {
   bool _tbOut = false, _tbIn = false; // take-back request sent / received
   int _tbN = 0; // number of half-moves when the request was made
   String? _notice;
-  String _myName = 'You', _oppName = 'Opponent';
+  String _oppName = 'Opponent';
   LanReconnect? _reconnect;
   StreamSubscription<RemoteLink>? _reconnectSub;
   bool get _lan => config.mode == GameMode.lan;
@@ -698,7 +698,6 @@ class GameController extends ChangeNotifier {
   }) {
     _dropLink();
     _isHost = isHost;
-    _myName = myName;
     _oppName = oppName;
     _attach(link);
     _reconnect = reconnect;
