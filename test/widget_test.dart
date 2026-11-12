@@ -209,15 +209,23 @@ void main() {
           ),
         ));
 
-    testWidgets('shows the status and both players, but no move list or captured pieces', (t) async {
+    testWidgets('only the button row is shown: no player cards, no status, no move list or captured pieces', (t) async {
       useTallScreen(t);
       final g = newGame();
       g.start(const GameConfig(mode: GameMode.bot, humanColor: Side.w, elo: 1800));
       await t.pumpWidget(hud(g));
-      expect(find.text('Your move'), findsOneWidget);
-      expect(find.text('Bot · 1800'), findsOneWidget);
-      expect(find.text('You'), findsOneWidget);
-      expect(find.text('Moves appear here'), findsNothing);
+      expect(find.text('Your move'), findsNothing);
+      expect(find.text('Bot · 1800'), findsNothing);
+      expect(find.text('You'), findsNothing);
+      expect(find.byKey(const Key('status')), findsNothing);
+      for (final k in ['btn-menu', 'btn-settings', 'btn-undo', 'btn-flip', 'btn-top', 'btn-reset', 'btn-resign']) {
+        expect(find.byKey(Key(k)), findsOneWidget, reason: k);
+      }
+      // the buttons share one horizontal row
+      final y = t.getCenter(find.byKey(const Key('btn-menu'))).dy;
+      for (final k in ['btn-settings', 'btn-undo', 'btn-flip', 'btn-top', 'btn-reset', 'btn-resign']) {
+        expect(t.getCenter(find.byKey(Key(k))).dy, y, reason: k);
+      }
       g.tap('e2');
       g.tap('e4');
       await t.pump();
@@ -281,7 +289,7 @@ void main() {
       await t.pumpWidget(hud(g, onMenu: () => menu++));
       expect(find.byKey(const Key('btn-draw')), findsOneWidget);
       expect(find.byKey(const Key('btn-resign')), findsOneWidget);
-      await t.tap(find.byTooltip('Menu'));
+      await t.tap(find.byKey(const Key('btn-menu')));
       expect(menu, 1);
     });
 
@@ -311,15 +319,9 @@ void main() {
       addTearDown(t.view.reset);
       final g = newGame();
       g.start(const GameConfig(mode: GameMode.local));
-      await t.pumpWidget(host(Align(
-        alignment: Alignment.centerRight,
-        child: SizedBox(
-          width: 340,
-          child: ListenableBuilder(
-            listenable: g,
-            builder: (_, __) => Hud(game: g, snapshot: g.snapshot, board: g.board, onMenu: () {}, onSettings: () {}, wide: true),
-          ),
-        ),
+      await t.pumpWidget(host(ListenableBuilder(
+        listenable: g,
+        builder: (_, __) => Hud(game: g, snapshot: g.snapshot, board: g.board, onMenu: () {}, onSettings: () {}, wide: true),
       )));
       expect(t.takeException(), isNull);
     });
@@ -327,26 +329,19 @@ void main() {
 
   group('landscape phone HUD', () {
     for (final size in const [Size(800, 360), Size(732, 412), Size(640, 320), Size(900, 400)]) {
-      testWidgets('side panel fits ${size.width.toInt()}x${size.height.toInt()} without overflow', (t) async {
+      testWidgets('button bar fits ${size.width.toInt()}x${size.height.toInt()} without overflow', (t) async {
         t.view.physicalSize = size;
         t.view.devicePixelRatio = 1;
         addTearDown(t.view.reset);
         final g = newGame();
         g.start(const GameConfig(mode: GameMode.local));
-        final panel = (size.width * 0.36).clamp(250.0, 340.0);
-        await t.pumpWidget(host(Align(
-          alignment: Alignment.centerRight,
-          child: SizedBox(
-            width: panel,
-            child: ListenableBuilder(
-              listenable: g,
-              builder: (_, __) => Hud(game: g, snapshot: g.snapshot, board: g.board, onMenu: () {}, onSettings: () {}, wide: true),
-            ),
-          ),
+        await t.pumpWidget(host(ListenableBuilder(
+          listenable: g,
+          builder: (_, __) => Hud(game: g, snapshot: g.snapshot, board: g.board, onMenu: () {}, onSettings: () {}, wide: true),
         )));
         expect(t.takeException(), isNull);
         // everything the player needs is on screen
-        for (final k in ['btn-undo', 'btn-flip', 'btn-top', 'btn-reset', 'btn-draw', 'btn-resign', 'status']) {
+        for (final k in ['btn-menu', 'btn-settings', 'btn-undo', 'btn-flip', 'btn-top', 'btn-reset', 'btn-draw', 'btn-resign']) {
           final r = t.getRect(find.byKey(Key(k)));
           expect(r.bottom, lessThanOrEqualTo(size.height), reason: '$k below the screen');
           expect(r.right, lessThanOrEqualTo(size.width), reason: '$k right of the screen');
