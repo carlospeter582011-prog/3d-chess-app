@@ -1,7 +1,10 @@
 package __PKG__
 
+import android.Manifest
+import android.app.Activity
 import android.app.ActivityManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.SoundPool
 import android.os.Build
@@ -10,9 +13,11 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
-/** Key-value storage (SharedPreferences) and sound effects (SoundPool) for the Dart side. */
-class ServicesChannel(private val ctx: Context, engine: FlutterEngine) : MethodChannel.MethodCallHandler {
+/** Storage, sound, and Android permissions for the Dart side. */
+class ServicesChannel(private val activity: Activity, engine: FlutterEngine) : MethodChannel.MethodCallHandler {
+    private val ctx = activity.applicationContext
     private val channel = MethodChannel(engine.dartExecutor.binaryMessenger, "chess3d/services")
+    private var networkPermissionRequest: MethodChannel.Result? = null
     private val prefs = ctx.getSharedPreferences("chess3d", Context.MODE_PRIVATE)
     private val sounds = HashMap<String, Int>()
     private val pool: SoundPool = SoundPool.Builder()
@@ -45,6 +50,7 @@ class ServicesChannel(private val ctx: Context, engine: FlutterEngine) : MethodC
                     prefs.edit().remove(call.argument<String>("key")).apply()
                     result.success(null)
                 }
+                "requestLocalNetworkPermission" -> requestLocalNetworkPermission(result)
                 "sfxLoad" -> {
                     val name = call.argument<String>("name") ?: throw IllegalArgumentException("name")
                     val wav = call.argument<ByteArray>("wav") ?: throw IllegalArgumentException("wav")
@@ -78,8 +84,41 @@ class ServicesChannel(private val ctx: Context, engine: FlutterEngine) : MethodC
         }
     }
 
+    private fun requestLocalNetworkPermission(result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT < 37 ||
+            activity.checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) == PackageManager.PERMISSION_GRANTED
+        ) {
+            result.success(true)
+            return
+        }
+        if (networkPermissionRequest != null) {
+            result.error("permission_in_progress", "Local network permission is already being requested.", null)
+            return
+        }
+        networkPermissionRequest = result
+        try {
+            activity.requestPermissions(arrayOf(Manifest.permission.ACCESS_LOCAL_NETWORK), LOCAL_NETWORK_REQUEST)
+        } catch (e: Exception) {
+            networkPermissionRequest = null
+            throw e
+        }
+    }
+
+    fun onRequestPermissionsResult(requestCode: Int, grantResults: IntArray) {
+        if (requestCode != LOCAL_NETWORK_REQUEST) return
+        val pending = networkPermissionRequest
+        networkPermissionRequest = null
+        pending?.success(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
+    }
+
     fun dispose() {
+        networkPermissionRequest?.success(false)
+        networkPermissionRequest = null
         channel.setMethodCallHandler(null)
         pool.release()
+    }
+
+    private companion object {
+        const val LOCAL_NETWORK_REQUEST = 3701
     }
 }

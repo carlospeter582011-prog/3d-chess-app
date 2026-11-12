@@ -12,6 +12,9 @@ import 'sfx_synth.dart';
 
 const MethodChannel _services = MethodChannel('chess3d/services');
 
+Future<bool> requestLocalNetworkPermission() async =>
+    await _services.invokeMethod<bool>('requestLocalNetworkPermission') ?? false;
+
 class ChannelStore implements KeyValueStore {
   final Map<String, String> _cache = {};
 

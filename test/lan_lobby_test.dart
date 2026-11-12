@@ -62,6 +62,28 @@ void main() {
     addTearDown(t.view.reset);
   }
 
+  testWidgets('denied local network permission leaves host and scanner closed', (t) async {
+    tall(t);
+    final services = LanServices(
+      requestPermission: () async => false,
+      makeHost: (_) => throw StateError('Host started without permission'),
+      makeScanner: () => throw StateError('Scanner started without permission'),
+    );
+    for (final host in [true, false]) {
+      await t.pumpWidget(wrap(LanLobby(
+        key: ValueKey(host),
+        host: host,
+        services: services,
+        onStart: (_) {},
+        onCancel: () {},
+      )));
+      await t.pumpAndSettle();
+      expect(find.text('Allow local network access in Android settings to play on Wi-Fi.'), findsOneWidget);
+      expect(find.byKey(const Key('lan-waiting')), findsNothing);
+      expect(find.byKey(const Key('lan-searching')), findsNothing);
+    }
+  });
+
   testWidgets('host: waits, shows the joined phone, then starts with the chosen colour', (t) async {
     tall(t);
     final host = _Host();

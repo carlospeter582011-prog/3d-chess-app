@@ -7,7 +7,9 @@ plugins {
 
 android {
     namespace = "__PKG__"
-    compileSdk = 36
+    compileSdk = 37
+    compileSdkMinor = 2
+    buildToolsVersion = "37.0.0"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -17,8 +19,8 @@ android {
 
     defaultConfig {
         applicationId = "__PKG__"
-        minSdk = 23          // Android 6.0; device must support OpenGL ES 3.0 and arm64
-        targetSdk = 36       // Google Play requires API 36 for new apps and updates from 31 Aug 2026
+        minSdk = 24          // Minimum supported by Flutter 3.50 and the Mobile Ads plugin
+        targetSdk = 37
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         ndk { abiFilters += listOf("arm64-v8a") }   // nearly all current phones; add "armeabi-v7a" / "x86_64" if you need them

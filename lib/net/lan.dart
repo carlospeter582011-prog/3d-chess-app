@@ -451,13 +451,20 @@ class LanSetup {
 
 /// What the lobby needs from the network layer (replaced by fakes in widget tests).
 class LanServices {
-  const LanServices({this.makeHost = _defaultHost, this.makeScanner = _defaultScanner, this.join = _defaultJoin});
+  const LanServices({
+    this.makeHost = _defaultHost,
+    this.makeScanner = _defaultScanner,
+    this.join = _defaultJoin,
+    this.requestPermission = _allowLocalNetwork,
+  });
 
   /// Gets the name the game is announced under.
   final LanHost Function(String gameName) makeHost;
   final LanScanner Function() makeScanner;
   final Future<RemoteLink> Function(LanAdvert ad, String playerName) join;
+  final Future<bool> Function() requestPermission;
 
+  static Future<bool> _allowLocalNetwork() async => true;
   static LanHost _defaultHost(String gameName) => LanHost(name: gameName);
   static LanScanner _defaultScanner() => LanScanner();
   static Future<RemoteLink> _defaultJoin(LanAdvert ad, String playerName) => joinLanGame(ad, name: playerName);
