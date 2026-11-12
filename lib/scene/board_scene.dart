@@ -62,6 +62,9 @@ abstract class BoardScene {
   void setMarkers(MarkerSet markers);
   void setLabelsVisible(bool v);
 
+  /// The room around the board: 'classic', 'library', 'cafe' or 'night'.
+  void setRoom(String name);
+
   // camera
   void resetCamera({bool animate = true, Side side = Side.w, bool top = false});
   void flipView();

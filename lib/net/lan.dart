@@ -4,8 +4,8 @@
 //  * a joining phone listens for those announcements and shows the games it finds;
 //  * tapping a game opens a TCP connection to the host. Messages are one JSON object per line.
 //
-// Messages after the hello/welcome handshake: start {you}, move {uci}, resign, draw {a: offer|accept|decline},
-// rematch, bye. A ping every 2 s detects a dropped connection (phone left the Wi-Fi, hotspot switched off, ...).
+// Messages after the hello/welcome handshake: start {you, time, inc, sid, host}, move {uci}, resign, timeout,
+// draw {a: offer|accept|decline}, tb {a: req|yes|no, n}, sync {moves}, rematch, bye. A ping every 2 s detects a dropped connection (phone left the Wi-Fi, hotspot switched off, ...).
 // Nothing here depends on Flutter, so it is unit-tested with real sockets on loopback.
 
 import 'dart:async';
@@ -15,9 +15,11 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import '../chess/types.dart';
+
 const int lanDiscoveryPort = 47820;
 const String lanAppId = 'chess3d.lan';
-const int lanProtocol = 1;
+const int lanProtocol = 2;
 
 /// A live connection to the other phone.
 abstract class RemoteLink {
@@ -153,6 +155,7 @@ class LanHost {
   final StreamController<LanGuest> _guests = StreamController.broadcast();
   SocketLink? _current;
   bool _stopped = false;
+  String? _sid; // set once the game has started: only that guest may come back
 
   /// Port guests connect to (valid after [start]).
   int get port => _server!.port;
@@ -160,6 +163,10 @@ class LanHost {
 
   /// True while a guest is connected: new visitors are turned away and announcements pause.
   bool get hasGuest => _current != null && _current!.isOpen;
+
+  /// The game has started: stop announcing, and from now on accept only a guest that shows [sid] (a phone that lost its
+  /// connection and is coming back). Everyone else is turned away.
+  void lock(String sid) => _sid = sid;
 
   Future<void> start() async {
     _server = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
@@ -181,12 +188,16 @@ class LanHost {
         unawaited(link.close());
         return;
       }
-      if (_stopped || hasGuest) {
+      final sid = m['sid'];
+      final turnAway = _stopped || (_sid != null ? sid != _sid : (hasGuest || sid != null));
+      if (turnAway) {
         link.send({'t': 'busy', 'why': 'full'});
         unawaited(link.close());
         return;
       }
+      final old = _current;
       _current = link;
+      if (old != null && !identical(old, link)) unawaited(old.close()); // a returning guest replaces its dead connection
       link.done.then((_) {
         if (identical(_current, link)) _current = null;
       });
@@ -220,12 +231,12 @@ class LanHost {
   }
 
   Future<void> _announce() async {
-    if (_stopped || hasGuest || _server == null) return;
+    if (_stopped || _sid != null || hasGuest || _server == null) return;
     final payload = utf8.encode(jsonEncode({'app': lanAppId, 'v': lanProtocol, 'id': id, 'name': name, 'port': _server!.port}));
     for (final (from, to) in await _routes()) {
       try {
         // one socket per local address, so the packet leaves through that network (Wi-Fi / hotspot), not mobile data
-        final sock = _senders['${from.address}'] ??= (await RawDatagramSocket.bind(from, 0))..broadcastEnabled = true;
+        final sock = _senders[from.address] ??= (await RawDatagramSocket.bind(from, 0))..broadcastEnabled = true;
         sock.send(payload, to, discoveryPort);
       } catch (_) {
         // an interface without broadcast support is skipped
@@ -310,7 +321,7 @@ class LanJoinException implements Exception {
 }
 
 /// Connects to an announced game. Throws [LanJoinException] with a player-readable reason.
-Future<RemoteLink> joinLanGame(LanAdvert ad, {String name = 'Guest', Duration timeout = const Duration(seconds: 6)}) async {
+Future<RemoteLink> joinLanGame(LanAdvert ad, {String name = 'Guest', String? sid, Duration timeout = const Duration(seconds: 6)}) async {
   Socket socket;
   try {
     socket = await Socket.connect(ad.address, ad.port, timeout: timeout);
@@ -325,7 +336,7 @@ Future<RemoteLink> joinLanGame(LanAdvert ad, {String name = 'Guest', Duration ti
   unawaited(link.done.then((_) {
     if (!reply.isCompleted) reply.completeError(LanJoinException('The host closed the connection.'));
   }));
-  link.send({'t': 'hello', 'app': lanAppId, 'v': lanProtocol, 'name': name});
+  link.send({'t': 'hello', 'app': lanAppId, 'v': lanProtocol, 'name': name, if (sid != null) 'sid': sid});
   try {
     final m = await reply.future.timeout(timeout);
     if (m['t'] == 'busy') {
@@ -341,14 +352,113 @@ Future<RemoteLink> joinLanGame(LanAdvert ad, {String name = 'Guest', Duration ti
   }
 }
 
+/// Brings a lost two-phone connection back. Emits a fresh, live link to the same opponent.
+abstract class LanReconnect {
+  Stream<RemoteLink> get links;
+
+  /// Called when the connection is lost: the guest starts trying to reach the host again (the host just keeps listening).
+  Future<void> start();
+  Future<void> stop();
+}
+
+/// Host side: the game's server socket stays open and takes the guest back when it shows the game's secret.
+class HostReconnect implements LanReconnect {
+  HostReconnect(this.host, String sid) {
+    host.lock(sid);
+  }
+  final LanHost host;
+
+  @override
+  Stream<RemoteLink> get links => host.guests.map((g) => g.link);
+  @override
+  Future<void> start() async {}
+  @override
+  Future<void> stop() => host.stop();
+}
+
+typedef LanJoinFn = Future<RemoteLink> Function(LanAdvert ad, String name, String? sid);
+
+Future<RemoteLink> _joinQuickly(LanAdvert ad, String name, String? sid) => joinLanGame(ad, name: name, sid: sid, timeout: const Duration(seconds: 3));
+
+/// Guest side: tries to reach the host again every couple of seconds, for a while.
+class GuestReconnect implements LanReconnect {
+  GuestReconnect({
+    required this.ad,
+    required this.sid,
+    required this.name,
+    this.join = _joinQuickly,
+    this.retryEvery = const Duration(seconds: 2),
+    this.giveUpAfter = const Duration(minutes: 2),
+  });
+  final LanAdvert ad;
+  final String sid, name;
+  final LanJoinFn join;
+  final Duration retryEvery, giveUpAfter;
+
+  final StreamController<RemoteLink> _links = StreamController.broadcast();
+  bool _running = false, _stopped = false;
+
+  @override
+  Stream<RemoteLink> get links => _links.stream;
+
+  @override
+  Future<void> start() async {
+    if (_running || _stopped) return;
+    _running = true;
+    final deadline = DateTime.now().add(giveUpAfter);
+    while (!_stopped && DateTime.now().isBefore(deadline)) {
+      try {
+        final l = await join(ad, name, sid);
+        if (_stopped) {
+          unawaited(l.close());
+        } else {
+          _links.add(l);
+        }
+        break;
+      } catch (_) {
+        await Future<void>.delayed(retryEvery);
+      }
+    }
+    _running = false;
+  }
+
+  @override
+  Future<void> stop() async {
+    _stopped = true;
+    if (!_links.isClosed) await _links.close();
+  }
+}
+
+/// Everything the game needs to start a two-phone game.
+class LanSetup {
+  const LanSetup({
+    required this.link,
+    required this.mySide,
+    required this.isHost,
+    this.timeSec = 0,
+    this.incSec = 0,
+    this.myName = 'You',
+    this.oppName = 'Opponent',
+    this.reconnect,
+  });
+  final RemoteLink link;
+  final Side mySide;
+  final bool isHost;
+  final int timeSec, incSec;
+  final String myName, oppName;
+  final LanReconnect? reconnect;
+}
+
 /// What the lobby needs from the network layer (replaced by fakes in widget tests).
 class LanServices {
   const LanServices({this.makeHost = _defaultHost, this.makeScanner = _defaultScanner, this.join = _defaultJoin});
-  final LanHost Function() makeHost;
-  final LanScanner Function() makeScanner;
-  final Future<RemoteLink> Function(LanAdvert ad) join;
 
-  static LanHost _defaultHost() => LanHost(name: randomGameName());
+  /// Gets the name the game is announced under.
+  final LanHost Function(String gameName) makeHost;
+  final LanScanner Function() makeScanner;
+  final Future<RemoteLink> Function(LanAdvert ad, String playerName) join;
+
+  static LanHost _defaultHost(String gameName) => LanHost(name: gameName);
   static LanScanner _defaultScanner() => LanScanner();
-  static Future<RemoteLink> _defaultJoin(LanAdvert ad) => joinLanGame(ad);
+  static Future<RemoteLink> _defaultJoin(LanAdvert ad, String playerName) => joinLanGame(ad, name: playerName);
 }

@@ -1,4 +1,4 @@
-// In-game HUD: status bar, player cards with captured pieces, move list and control buttons.
+// In-game HUD: menu and settings buttons, status line, player cards (with clocks) and control buttons.
 // Narrow screens: overlays above / below the board. Wide screens: a side panel.
 
 import 'package:flutter/material.dart';
@@ -7,18 +7,7 @@ import '../chess/types.dart';
 import '../game/game_controller.dart';
 import '../game/settings.dart';
 import '../scene/board_scene.dart';
-import 'glyphs.dart';
 import 'theme.dart';
-
-const _capturedOrder = [PT.q, PT.r, PT.b, PT.n, PT.p];
-
-/// Material balance from [c]'s point of view (positive = ahead).
-int materialBalance(GameSnapshot s, Side c) {
-  int sum(List<PT> l) => l.fold(0, (a, t) => a + t.value);
-  final mine = sum(s.captured[c.other]!); // what I captured = what the other side lost
-  final theirs = sum(s.captured[c]!);
-  return mine - theirs;
-}
 
 /// The status line shown at the top.
 ({String text, String tone}) statusText(GameSnapshot s) {
@@ -34,52 +23,29 @@ int materialBalance(GameSnapshot s, Side c) {
     };
     return (text: text, tone: 'over');
   }
-  if (lan && s.linkLost) return (text: 'Opponent disconnected', tone: 'check');
+  if (lan && s.linkLost) return (text: '${s.opponentName} disconnected · waiting to reconnect…', tone: 'check');
   if (lan && s.drawOfferOut) return (text: 'Draw offered · waiting for the answer', tone: 'think');
+  if (lan && s.takebackOut) return (text: 'Take-back requested · waiting for the answer', tone: 'think');
+  if (lan && s.notice != null) return (text: s.notice!, tone: 'think');
   if (s.thinking) return (text: 'Bot is thinking…', tone: 'think');
   if (s.check) {
     return (text: (bot || lan) ? (s.turn == human ? 'Your king is in check!' : 'Check!') : '${s.turn.label} is in check!', tone: 'check');
   }
   if (bot) return (text: s.turn == human ? 'Your move' : '…', tone: '');
-  if (lan) return (text: s.turn == human ? 'Your move' : 'Opponent is thinking…', tone: '');
+  if (lan) return (text: s.turn == human ? 'Your move' : '${s.opponentName} is thinking…', tone: '');
   return (text: '${s.turn.label} to move', tone: '');
 }
 
-class _Captured extends StatelessWidget {
-  const _Captured({required this.lost, required this.color});
-  final List<PT> lost;
-  final Side color; // colour of the pieces that were lost
-  @override
-  Widget build(BuildContext context) {
-    final sorted = [...lost]..sort((a, b) => _capturedOrder.indexOf(a).compareTo(_capturedOrder.indexOf(b)));
-    return Text(
-      sorted.map((t) => glyph[t]!).join(),
-      style: TextStyle(
-        fontSize: 20,
-        height: 1,
-        letterSpacing: -2,
-        color: color == Side.w ? C.white : C.black,
-        shadows: color == Side.w
-            ? const [Shadow(blurRadius: 2, color: Colors.black)]
-            : const [Shadow(blurRadius: 2, color: Color(0x8CFFFFFF))],
-      ),
-    );
-  }
-}
-
 class _PlayerCard extends StatelessWidget {
-  const _PlayerCard({required this.s, required this.side, required this.label, this.sub, this.compact = false, this.showCaptured = false});
+  const _PlayerCard({required this.s, required this.side, required this.label, this.sub, this.compact = false});
   final GameSnapshot s;
   final Side side;
   final String label;
   final String? sub;
   final bool compact;
-  final bool showCaptured;
 
   @override
   Widget build(BuildContext context) {
-    final lost = s.captured[side.other]!; // pieces this player has captured
-    final diff = materialBalance(s, side);
     final active = s.status == GameStatus.playing && s.turn == side;
     return Container(
       constraints: BoxConstraints(minHeight: compact ? 36 : 46),
@@ -106,12 +72,6 @@ class _PlayerCard extends StatelessWidget {
         ]),
         const Spacer(),
         if (s.config.timed) _Clock(ms: side == Side.w ? s.whiteMs : s.blackMs, running: active && s.history.isNotEmpty, side: side),
-        if (s.config.timed && showCaptured) const SizedBox(width: 8),
-        if (showCaptured) Flexible(child: _Captured(lost: lost, color: side.other)),
-        if (showCaptured && diff > 0) ...[
-          const SizedBox(width: 8),
-          Text('+$diff', style: const TextStyle(color: C.ok, fontWeight: FontWeight.w700, fontSize: 13)),
-        ],
       ]),
     );
   }
@@ -151,66 +111,6 @@ class _Clock extends StatelessWidget {
           color: low && ms > 0 ? const Color(0xFFFF8A80) : Colors.white,
         ),
       ),
-    );
-  }
-}
-
-class _MoveList extends StatefulWidget {
-  const _MoveList({required this.history, required this.vertical, this.compact = false});
-  final List<String> history;
-  final bool vertical;
-  final bool compact;
-  @override
-  State<_MoveList> createState() => _MoveListState();
-}
-
-class _MoveListState extends State<_MoveList> {
-  final ScrollController _c = ScrollController();
-
-  @override
-  void didUpdateWidget(_MoveList old) {
-    super.didUpdateWidget(old);
-    if (old.history.length != widget.history.length) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_c.hasClients) _c.jumpTo(_c.position.maxScrollExtent);
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final h = widget.history;
-    final items = <Widget>[];
-    for (var i = 0; i < h.length; i += 2) {
-      items.add(Text.rich(
-        TextSpan(children: [
-          TextSpan(text: '${i ~/ 2 + 1}. ', style: const TextStyle(color: C.muted)),
-          TextSpan(text: '${h[i]} ${i + 1 < h.length ? h[i + 1] : ''}'),
-        ]),
-        style: const TextStyle(fontSize: 14),
-      ));
-    }
-    final empty = h.isEmpty;
-    return Container(
-      constraints: BoxConstraints(minHeight: widget.compact ? 0 : 38),
-      padding: EdgeInsets.symmetric(horizontal: 12, vertical: widget.compact ? 5 : 8),
-      decoration: BoxDecoration(color: C.panel, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.line)),
-      alignment: Alignment.centerLeft,
-      child: empty
-          ? const Text('Moves appear here', style: TextStyle(color: C.muted))
-          : widget.vertical
-              ? SingleChildScrollView(controller: _c, child: Wrap(spacing: 14, runSpacing: 6, children: items))
-              : SingleChildScrollView(
-                  controller: _c,
-                  scrollDirection: Axis.horizontal,
-                  child: Row(children: [for (final w in items) Padding(padding: const EdgeInsets.only(right: 12), child: w)]),
-                ),
     );
   }
 }
@@ -257,8 +157,6 @@ class Hud extends StatefulWidget {
     required this.onMenu,
     required this.onSettings,
     this.wide = false,
-    this.showMoves = false,
-    this.showCaptured = false,
   });
 
   final GameController game;
@@ -266,7 +164,6 @@ class Hud extends StatefulWidget {
   final BoardScene board;
   final VoidCallback onMenu, onSettings;
   final bool wide;
-  final bool showMoves, showCaptured;
 
   @override
   State<Hud> createState() => _HudState();
@@ -377,20 +274,18 @@ class _HudState extends State<Hud> {
       _PlayerCard(
         s: s,
         side: opp,
-        label: bot ? 'Bot · ${s.config.elo}' : (lan ? 'Opponent' : opp.label),
+        label: bot ? 'Bot · ${s.config.elo}' : (lan ? s.opponentName : opp.label),
         sub: mine ? opp.label : null,
         compact: compact,
-        showCaptured: widget.showCaptured,
       ),
-      if (widget.showMoves) ...[
-        SizedBox(height: gap),
-        if (widget.wide) Flexible(child: _MoveList(history: s.history, vertical: true, compact: compact)) else _MoveList(history: s.history, vertical: false),
-      ],
     ]);
 
     final controls = Row(children: [
       for (final w in <Widget>[
-        _CtrlButton(compact: compact, key: const Key('btn-undo'), icon: '↶', label: 'Undo', onPressed: s.canUndo ? widget.game.undo : null),
+        if (lan)
+          _CtrlButton(compact: compact, key: const Key('btn-undo'), icon: '↶', label: 'Take back', onPressed: s.canTakeback ? widget.game.requestTakeback : null)
+        else
+          _CtrlButton(compact: compact, key: const Key('btn-undo'), icon: '↶', label: 'Undo', onPressed: s.canUndo ? widget.game.undo : null),
         _CtrlButton(compact: compact, key: const Key('btn-flip'), icon: '⟳', label: 'Flip', onPressed: widget.board.flipView),
         _CtrlButton(
           compact: compact,
@@ -433,7 +328,7 @@ class _HudState extends State<Hud> {
     ]);
 
     final bottom = Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      _PlayerCard(s: s, side: me, label: mine ? 'You' : me.label, sub: mine ? me.label : null, compact: compact, showCaptured: widget.showCaptured),
+      _PlayerCard(s: s, side: me, label: mine ? 'You' : me.label, sub: mine ? me.label : null, compact: compact),
       SizedBox(height: gap),
       controls,
     ]);

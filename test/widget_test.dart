@@ -34,6 +34,8 @@ GameController newGame() => GameController(
 
 Widget host(Widget child) => MaterialApp(theme: buildTheme(), home: Scaffold(body: child));
 
+bool noOverflow(WidgetTester t) => t.takeException() == null;
+
 void useTallScreen(WidgetTester t) {
   t.view.physicalSize = const Size(450, 1000);
   t.view.devicePixelRatio = 1;
@@ -45,21 +47,24 @@ void main() {
     Widget menu({
       required ValueNotifier<Settings> settings,
       required List<Settings> started,
-      SavedGame? saved,
+      List<SavedGame> slots = const [],
       bool hasActive = false,
       VoidCallback? onContinue,
-      VoidCallback? onResumeSaved,
+      void Function(SavedGame)? onResumeSlot,
+      void Function(String)? onDeleteSlot,
     }) =>
         host(ValueListenableBuilder<Settings>(
           valueListenable: settings,
           builder: (_, s, __) => MenuScreen(
             settings: s,
             onSettings: (n) => settings.value = n,
-            saved: saved,
+            slots: slots,
+            now: () => DateTime.fromMillisecondsSinceEpoch(10 * 60 * 1000),
             hasActive: hasActive,
             onStart: started.add,
             onContinue: onContinue ?? () {},
-            onResumeSaved: onResumeSaved ?? () {},
+            onResumeSlot: onResumeSlot ?? (_) {},
+            onDeleteSlot: onDeleteSlot ?? (_) {},
             onOpenSettings: () {},
             onHost: () {},
             onJoin: () {},
@@ -132,22 +137,36 @@ void main() {
       expect(settings.value.elo, 3200);
     });
 
-    testWidgets('a saved game offers to continue; an active game offers to go back', (t) async {
+    testWidgets('saved games are listed with continue and delete; an active game offers to go back', (t) async {
       useTallScreen(t);
       final settings = ValueNotifier(const Settings());
-      var resumed = 0, continued = 0;
-      await t.pumpWidget(menu(
-        settings: settings,
-        started: [],
-        saved: const SavedGame(GameConfig(mode: GameMode.bot, humanColor: Side.w, elo: 1500), ['e2e4']),
-        onResumeSaved: () => resumed++,
-      ));
-      expect(find.byKey(const Key('resume-saved')), findsOneWidget);
-      await t.tap(find.byKey(const Key('resume-saved')));
-      expect(resumed, 1);
+      final g1 = SavedGame(const GameConfig(mode: GameMode.bot, humanColor: Side.w, elo: 1500), const ['e2e4', 'e7e5'], id: 'a', ts: 7 * 60 * 1000);
+      final g2 = SavedGame(const GameConfig(mode: GameMode.local, timeSec: 300, incSec: 2), const ['d2d4'], id: 'b', ts: 1 * 60 * 1000);
+      final resumed = <String>[], deleted = <String>[];
+      var continued = 0;
+      await t.pumpWidget(menu(settings: settings, started: [], slots: [g1, g2], onResumeSlot: (g) => resumed.add(g.id), onDeleteSlot: deleted.add));
+      expect(find.text('SAVED GAMES (2/3)'), findsOneWidget);
+      expect(find.textContaining('Bot 1500'), findsOneWidget);
+      expect(find.textContaining('3 min ago'), findsOneWidget);
+      expect(find.textContaining('5 min + 2s'), findsOneWidget);
+      await t.ensureVisible(find.byKey(const Key('slot-a')));
+      await t.tap(find.byKey(const Key('slot-a')));
+      expect(resumed, ['a']);
+      await t.ensureVisible(find.byKey(const Key('slot-del-b')));
+      await t.tap(find.byKey(const Key('slot-del-b')));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const Key('slot-del-no')));
+      await t.pumpAndSettle();
+      expect(deleted, isEmpty);
+      await t.tap(find.byKey(const Key('slot-del-b')));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const Key('slot-del-yes')));
+      await t.pumpAndSettle();
+      expect(deleted, ['b']);
 
       await t.pumpWidget(menu(settings: settings, started: [], hasActive: true, onContinue: () => continued++));
-      expect(find.byKey(const Key('resume-saved')), findsNothing);
+      expect(find.textContaining('SAVED GAMES'), findsNothing);
+      await t.ensureVisible(find.byKey(const Key('continue')));
       await t.tap(find.byKey(const Key('continue')));
       expect(continued, 1);
     });
@@ -155,7 +174,7 @@ void main() {
     testWidgets('no continue buttons on a fresh install', (t) async {
       useTallScreen(t);
       await t.pumpWidget(menu(settings: ValueNotifier(const Settings()), started: []));
-      expect(find.byKey(const Key('resume-saved')), findsNothing);
+      expect(find.textContaining('SAVED GAMES'), findsNothing);
       expect(find.byKey(const Key('continue')), findsNothing);
     });
   });
@@ -176,28 +195,10 @@ void main() {
       expect(statusText(g2.snapshot).tone, 'check');
       expect(statusText(g2.snapshot).text, 'White is in check!');
     });
-
-    test('material balance counts captured piece values', () async {
-      final g = newGame();
-      g.start(const GameConfig(mode: GameMode.local));
-      g.debugLoadFen('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
-      expect(materialBalance(g.snapshot, Side.w), 0);
-      g.tap('e2');
-      g.tap('e4');
-      await Future<void>.delayed(Duration.zero);
-      g.tap('d7');
-      g.tap('d5');
-      await Future<void>.delayed(Duration.zero);
-      g.tap('e4');
-      g.tap('d5');
-      await Future<void>.delayed(Duration.zero);
-      expect(materialBalance(g.snapshot, Side.w), 1);
-      expect(materialBalance(g.snapshot, Side.b), -1);
-    });
   });
 
   group('HUD', () {
-    Widget hud(GameController g, {VoidCallback? onMenu, bool showMoves = true, bool showCaptured = true}) => host(ListenableBuilder(
+    Widget hud(GameController g, {VoidCallback? onMenu}) => host(ListenableBuilder(
           listenable: g,
           builder: (_, __) => Hud(
             game: g,
@@ -205,12 +206,10 @@ void main() {
             board: g.board,
             onMenu: onMenu ?? () {},
             onSettings: () {},
-            showMoves: showMoves,
-            showCaptured: showCaptured,
           ),
         ));
 
-    testWidgets('shows the status, both players and the move list', (t) async {
+    testWidgets('shows the status and both players, but no move list or captured pieces', (t) async {
       useTallScreen(t);
       final g = newGame();
       g.start(const GameConfig(mode: GameMode.bot, humanColor: Side.w, elo: 1800));
@@ -218,12 +217,12 @@ void main() {
       expect(find.text('Your move'), findsOneWidget);
       expect(find.text('Bot · 1800'), findsOneWidget);
       expect(find.text('You'), findsOneWidget);
-      expect(find.text('Moves appear here'), findsOneWidget);
+      expect(find.text('Moves appear here'), findsNothing);
       g.tap('e2');
       g.tap('e4');
       await t.pump();
       await t.pump();
-      expect(find.textContaining('1. e4'), findsOneWidget);
+      expect(find.textContaining('1. e4'), findsNothing);
     });
 
     testWidgets('a timed game shows both clocks, an untimed one none', (t) async {
@@ -241,15 +240,6 @@ void main() {
       g2.start(const GameConfig(mode: GameMode.local));
       await t.pumpWidget(hud(g2));
       expect(find.byKey(const Key('clock-w')), findsNothing);
-    });
-
-    testWidgets('move list is hidden when the setting is off', (t) async {
-      useTallScreen(t);
-      final g = newGame();
-      g.start(const GameConfig(mode: GameMode.bot, humanColor: Side.w, elo: 1800));
-      await t.pumpWidget(hud(g, showMoves: false, showCaptured: false));
-      expect(find.text('Moves appear here'), findsNothing);
-      expect(find.text('Your move'), findsOneWidget);
     });
 
     testWidgets('undo is disabled at the start', (t) async {
@@ -416,6 +406,40 @@ void main() {
       await t.tap(find.byKey(const Key('set-flip')));
       await t.pump();
       expect(current.autoFlip, isTrue);
+      expect(find.text('Show move list'), findsNothing); // the move list and captured pieces are gone
+      await t.ensureVisible(find.byKey(const Key('set-haptics')));
+      await t.tap(find.byKey(const Key('set-haptics')));
+      await t.pump();
+      expect(current.haptics, isTrue);
+      await t.ensureVisible(find.byKey(const Key('set-room-night')));
+      await t.tap(find.byKey(const Key('set-room-night')));
+      await t.pump();
+      expect(current.room, Room.night);
+      await t.ensureVisible(find.byKey(const Key('set-name')));
+      await t.enterText(find.byKey(const Key('set-name')), 'Sam');
+      await t.pump();
+      expect(current.playerName, 'Sam');
+      await t.ensureVisible(find.byKey(const Key('set-pack')));
+      await t.tap(find.byKey(const Key('set-pack')));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Glass').last);
+      await t.pumpAndSettle();
+      expect(current.soundPack, SoundPack.glass);
+    });
+
+    testWidgets('result card: Rematch has its own line and no label is cut', (t) async {
+      useTallScreen(t);
+      final g = newGame();
+      g.start(const GameConfig(mode: GameMode.local));
+      g.debugLoadFen('7k/6Q1/6K1/8/8/8/8/8 b - - 0 1');
+      await t.pumpWidget(host(ResultDialog(snapshot: g.snapshot, onRematch: () {}, onMenu: () {}, onClose: () {})));
+      final rematch = t.getSize(find.byKey(const Key('rematch')));
+      final view = t.getSize(find.byKey(const Key('view-board')));
+      expect(rematch.width, greaterThan(view.width)); // full width, not squeezed into a third
+      for (final label in ['Rematch', 'View board', 'Menu']) {
+        expect(find.textContaining(label), findsOneWidget);
+      }
+      expect(noOverflow(t), isTrue);
     });
   });
 }

@@ -41,6 +41,9 @@ abstract class SceneRenderer {
   /// Shows or hides the a-h / 1-8 board coordinates (real quads in the native scene).
   Future<void> setLabels(bool on);
 
+  /// Changes the room: table, background colour and lights.
+  Future<void> setRoom(String name);
+
   /// Sends one frame. Implementations may drop an older frame when a newer one arrives.
   void sendFrame(Float32List frame);
 
@@ -95,6 +98,11 @@ class ChannelSceneRenderer implements SceneRenderer {
   @override
   Future<void> setLabels(bool on) async {
     await _ch.invokeMethod<void>('setLabels', {'on': on});
+  }
+
+  @override
+  Future<void> setRoom(String name) async {
+    await _ch.invokeMethod<void>('setRoom', {'name': name});
   }
 
   @override

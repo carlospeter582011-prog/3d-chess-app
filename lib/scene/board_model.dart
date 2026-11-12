@@ -75,6 +75,7 @@ class BoardModel implements BoardScene {
   PieceObj? _lifted;
   MarkerSet _markers = MarkerSet.none;
   bool labelsVisible = true;
+  String room = 'classic';
   bool dirty = true;
   double viewWidth = 1, viewHeight = 1;
   bool modelsReady = false;
@@ -278,6 +279,14 @@ class BoardModel implements BoardScene {
   }
 
   MarkerSet get markers => _markers;
+
+  @override
+  @override
+  void setRoom(String name) {
+    if (room == name) return;
+    room = name;
+    requestRender();
+  }
 
   @override
   void setLabelsVisible(bool v) {

@@ -62,7 +62,7 @@ class PromotionDialog extends StatelessWidget {
 String resultTitle(GameSnapshot s) {
   if (s.winner == null) return 'Draw';
   if (s.config.mode == GameMode.bot) return s.winner == s.config.humanColor ? 'You win! \u{1F389}' : 'Bot wins';
-  if (s.config.mode == GameMode.lan) return s.winner == s.config.humanColor ? 'You win! \u{1F389}' : 'Your opponent wins';
+  if (s.config.mode == GameMode.lan) return s.winner == s.config.humanColor ? 'You win! \u{1F389}' : '${s.opponentName} wins';
   return '${s.winner!.label} wins!';
 }
 
@@ -81,12 +81,13 @@ class ResultDialog extends StatelessWidget {
         const SizedBox(height: 14),
         Text('${s.reason}$moves', textAlign: TextAlign.center, style: const TextStyle(color: C.muted)),
         const SizedBox(height: 14),
+        // Rematch on its own line so no label is ever squeezed into two lines
+        GoldButton(key: const Key('rematch'), label: '♻  Rematch', onPressed: onRematch),
+        const SizedBox(height: 8),
         Row(children: [
-          Expanded(child: GhostButton(label: 'View board', onPressed: onClose)),
+          Expanded(child: GhostButton(key: const Key('view-board'), label: 'View board', onPressed: onClose)),
           const SizedBox(width: 8),
-          Expanded(child: GhostButton(label: 'Menu', onPressed: onMenu)),
-          const SizedBox(width: 8),
-          Expanded(child: GoldButton(key: const Key('rematch'), label: 'Rematch', onPressed: onRematch)),
+          Expanded(child: GhostButton(key: const Key('result-menu'), label: 'Menu', onPressed: onMenu)),
         ]),
       ]),
     );
@@ -112,6 +113,26 @@ class DrawOfferDialog extends StatelessWidget {
       );
 }
 
+/// The other player (two-phone game) asks to take back a move.
+class TakebackOfferDialog extends StatelessWidget {
+  const TakebackOfferDialog({super.key, required this.name, required this.onAnswer});
+  final String name;
+  final ValueChanged<bool> onAnswer;
+
+  @override
+  Widget build(BuildContext context) => ModalCard(
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('$name asks to take back a move', textAlign: TextAlign.center, style: const TextStyle(fontSize: 20, color: C.gold2)),
+          const SizedBox(height: 16),
+          Row(children: [
+            Expanded(child: GhostButton(key: const Key('tb-decline'), label: 'Decline', onPressed: () => onAnswer(false))),
+            const SizedBox(width: 8),
+            Expanded(child: GoldButton(key: const Key('tb-accept'), label: 'Allow', onPressed: () => onAnswer(true))),
+          ]),
+        ]),
+      );
+}
+
 /// Settings sheet. Changes apply immediately through [onChanged].
 class SettingsDialog extends StatefulWidget {
   const SettingsDialog({super.key, required this.settings, required this.onChanged});
@@ -124,6 +145,13 @@ class SettingsDialog extends StatefulWidget {
 
 class _SettingsDialogState extends State<SettingsDialog> {
   late Settings s = widget.settings;
+  late final TextEditingController _name = TextEditingController(text: widget.settings.playerName);
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
 
   void _set(Settings n) {
     setState(() => s = n);
@@ -153,13 +181,69 @@ class _SettingsDialogState extends State<SettingsDialog> {
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               const Text('Settings', textAlign: TextAlign.center, style: TextStyle(fontSize: 18)),
               const SizedBox(height: 10),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: TextField(
+                  key: const Key('set-name'),
+                  controller: _name,
+                  maxLength: 16,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(labelText: 'Your name (2-phone games)', counterText: '', isDense: true),
+                  onChanged: (v) => _set(s.copyWith(playerName: v.trim())),
+                ),
+              ),
               _toggle(const Key('set-sound'), 'Sound effects', null, s.sound, (v) => _set(s.copyWith(sound: v))),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(children: [
+                  const Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('Sound set', style: TextStyle(fontWeight: FontWeight.w700)),
+                      Text('How moves, captures and check sound', style: TextStyle(color: C.muted, fontSize: 12)),
+                    ]),
+                  ),
+                  DropdownButton<SoundPack>(
+                    key: const Key('set-pack'),
+                    value: s.soundPack,
+                    dropdownColor: const Color(0xFF2A2018),
+                    underline: const SizedBox.shrink(),
+                    items: const [
+                      DropdownMenuItem(value: SoundPack.wood, child: Text('Wood')),
+                      DropdownMenuItem(value: SoundPack.glass, child: Text('Glass')),
+                      DropdownMenuItem(value: SoundPack.soft, child: Text('Soft')),
+                    ],
+                    onChanged: (p) {
+                      if (p != null) _set(s.copyWith(soundPack: p));
+                    },
+                  ),
+                ]),
+              ),
+              _toggle(const Key('set-haptics'), 'Vibration', 'A short buzz on moves, captures and check', s.haptics, (v) => _set(s.copyWith(haptics: v))),
+              const SizedBox(height: 6),
+              const Text('Room', style: TextStyle(fontWeight: FontWeight.w700)),
+              const Text('The table, walls and light around the board', style: TextStyle(color: C.muted, fontSize: 12)),
+              const SizedBox(height: 8),
+              Wrap(spacing: 6, runSpacing: 6, children: [
+                for (final (label, r) in const [('Classic', Room.classic), ('Library', Room.library), ('Café', Room.cafe), ('Night', Room.night)])
+                  InkWell(
+                    key: Key('set-room-${r.name}'),
+                    borderRadius: BorderRadius.circular(999),
+                    onTap: () => _set(s.copyWith(room: r)),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: s.room == r ? const Color(0x33F2C977) : null,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: s.room == r ? C.gold : C.line),
+                      ),
+                      child: Text(label, style: TextStyle(fontSize: 14, color: s.room == r ? C.gold2 : C.muted)),
+                    ),
+                  ),
+              ]),
+              const SizedBox(height: 8),
               _toggle(const Key('set-labels'), 'Board coordinates', 'a–h and 1–8 around the board', s.labels, (v) => _set(s.copyWith(labels: v))),
               _toggle(const Key('set-flip'), 'Auto-flip board (2 players)', 'Turns the view 180° after every move, keeping zoom and tilt', s.autoFlip,
                   (v) => _set(s.copyWith(autoFlip: v))),
-              _toggle(const Key('set-moves'), 'Show move list', 'The list of moves played, in the game screen', s.showMoves, (v) => _set(s.copyWith(showMoves: v))),
-              _toggle(const Key('set-captured'), 'Show captured pieces', 'Pieces each player has taken, and the material lead', s.showCaptured,
-                  (v) => _set(s.copyWith(showCaptured: v))),
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Row(children: [

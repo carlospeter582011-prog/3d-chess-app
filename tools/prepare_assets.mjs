@@ -124,7 +124,24 @@ function makeNoise(seed) {
   return { fbm, rnd };
 }
 
-function woodColor(noise, u, v, { planks, dark }) {
+const ROOMS = {
+  classic: { file: 'table', style: 'wood', planks: 4, pal: [[0, [0x3b, 0x24, 0x15]], [0.5, [0x6a, 0x42, 0x26]], [1, [0x93, 0x62, 0x3a]]], pool: 1.0, floor: [[0, [0x04, 0x03, 0x02]], [0.2, [0x06, 0x05, 0x04]], [0.45, [0x12, 0x0e, 0x0b]], [1, [0x15, 0x11, 0x0e]]] },
+  library: { file: 'table_library', style: 'wood', planks: 4, pal: [[0, [0x2a, 0x10, 0x0c]], [0.5, [0x55, 0x20, 0x14]], [1, [0x7a, 0x34, 0x20]]], pool: 1.35, floor: [[0, [0x03, 0x02, 0x01]], [0.2, [0x04, 0x02, 0x01]], [0.45, [0x09, 0x05, 0x03]], [1, [0x0d, 0x07, 0x04]]] },
+  cafe: { file: 'table_cafe', style: 'wood', planks: 5, pal: [[0, [0x8a, 0x62, 0x3a]], [0.5, [0xb8, 0x8a, 0x58]], [1, [0xd8, 0xb0, 0x7c]]], pool: 1.12, floor: [[0, [0x0c, 0x0a, 0x08]], [0.2, [0x10, 0x0d, 0x0b]], [0.45, [0x1a, 0x16, 0x12]], [1, [0x22, 0x1d, 0x19]]] },
+  night: { file: 'table_night', style: 'marble', planks: 1, pal: [[0, [0x24, 0x2b, 0x3a]], [0.6, [0x46, 0x51, 0x68]], [1, [0x86, 0x92, 0xaa]]], pool: 0.9, floor: [[0, [0x02, 0x03, 0x05]], [0.2, [0x03, 0x04, 0x07]], [0.45, [0x06, 0x08, 0x0f]], [1, [0x08, 0x0b, 0x13]]] },
+};
+
+function marbleColor(noise, u, v, pal) {
+  const base = noise.fbm(u * 4, v * 4, 5);
+  const warp = noise.fbm(u * 6 + 9, v * 6 + 3, 4) * 3;
+  const vein = Math.abs(Math.sin((u * 5 + v * 2 + warp) * Math.PI));
+  const veins = Math.pow(1 - vein, 7);
+  const c = gradient(pal, 0.2 + 0.55 * base);
+  const k = 1 + veins * 0.7;
+  return [Math.min(255, c[0] * k), Math.min(255, c[1] * k), Math.min(255, c[2] * k)];
+}
+
+function woodColor(noise, u, v, { planks, dark, pal }) {
   // u runs across the planks, v along the grain; both in 0..1
   const plank = Math.min(planks - 1, Math.floor(u * planks)), pu = u * planks - plank;
   const shift = noise.rnd() * 0; // keep deterministic per pixel
@@ -134,31 +151,31 @@ function woodColor(noise, u, v, { planks, dark }) {
   const fine = noise.fbm(u * 90, v * 6, 3);
   const grain = 0.5 + 0.5 * rings;
   let t = 0.35 * grain + 0.45 * fine + 0.2 * noise.fbm(u * 14, v * 40, 2) + shift;
-  const c = gradient([[0, [0x3b, 0x24, 0x15]], [0.5, [0x6a, 0x42, 0x26]], [1, [0x93, 0x62, 0x3a]]], t);
+  const c = gradient(pal, t);
   const seam = Math.min(pu, 1 - pu) < 0.012 ? 0.45 : 1; // dark gap between planks
   const k = tone * seam * (dark ? 0.62 : 1);
   return [c[0] * k, c[1] * k, c[2] * k];
 }
 
-async function tableAtlas() {
+async function tableAtlas(room) {
   const W = 2048, H = 1024, noise = makeNoise(777);
   const img = await png(W, H, (x, y) => {
     if (x < 1024) { // top
       const u = x / 1024, v = y / 1024, px = (u - 0.5) * 2 * TABLE_R, pz = (v - 0.5) * 2 * TABLE_R;
-      const c = woodColor(noise, u, v, { planks: 4, dark: false });
+      const c = room.style === 'marble' ? marbleColor(noise, u, v, room.pal) : woodColor(noise, u, v, { planks: room.planks, dark: false, pal: room.pal });
       const r = Math.hypot(px, pz) / TABLE_R;
-      const pool = 1.05 - 0.55 * Math.min(1, r * r * 0.9 + (r > 0.55 ? (r - 0.55) * 0.5 : 0)); // light pool in the middle
+      const pool = room.pool * (1.05 - 0.55 * Math.min(1, r * r * 0.9 + (r > 0.55 ? (r - 0.55) * 0.5 : 0))); // light pool in the middle
       const n = (noise.rnd() - 0.5) * 3;
       return [c[0] * pool + n, c[1] * pool + n, c[2] * pool + n, 255];
     }
     if (x < 1536) { // edge and pedestal: grain runs around, so it is stretched along u
       const u = (x - 1024) / 512, v = y / 1024;
-      const c = woodColor(noise, v, u * 0.5, { planks: 1, dark: true });
+      const c = room.style === 'marble' ? marbleColor(noise, v, u * 0.5, room.pal).map((x) => x * 0.7) : woodColor(noise, v, u * 0.5, { planks: 1, dark: true, pal: room.pal });
       return [c[0], c[1], c[2], 255];
     }
     // floor: centre of this tile is under the table
     const dx = ((x - 1536) / 512 - 0.5) * 2, dy = (y / 1024 - 0.5) * 2, d = Math.hypot(dx, dy);
-    const shadow = gradient([[0, [0x04, 0x03, 0x02]], [0.2, [0x06, 0x05, 0x04]], [0.45, [0x12, 0x0e, 0x0b]], [1, [0x15, 0x11, 0x0e]]], d / 1);
+    const shadow = gradient(room.floor, d / 1);
     const n = (noise.rnd() - 0.5) * 2;
     return [shadow[0] + n, shadow[1] + n, shadow[2] + n, 255];
   });
@@ -215,8 +232,8 @@ function tableGeometry() {
   return { positions: P, normals: N, uvs: T, indices: I };
 }
 
-async function tableModel() {
-  const jpg = await tableAtlas();
+async function tableModel(room) {
+  const jpg = await tableAtlas(room);
   const g = tableGeometry();
   const doc = buildModel('table', {
     ...g,
@@ -226,7 +243,7 @@ async function tableModel() {
         .setRoughnessFactor(0.55).setMetallicFactor(0).setDoubleSided(true);
     },
   });
-  await io.write(`${OUT}/table.glb`, doc);
+  await io.write(`${OUT}/${room.file}.glb`, doc);
 }
 
 async function checkModel() {
@@ -249,7 +266,7 @@ async function checkModel() {
 
 let total = 0;
 if (!process.env.ONLY_TABLE) for (const f of FILES) { const sz = await convert(f); total += sz; console.log(f.padEnd(14), (sz / 1e6).toFixed(2), 'MB'); }
-await tableModel();
+for (const room of Object.values(ROOMS)) await tableModel(room);
 if (process.env.ONLY_TABLE) process.exit(0);
 await checkModel();
 await io.write(`${OUT}/marker_sel.glb`, buildModel('marker_sel', { ...quad(0.49), material: unlitMat(0x4fd18b, 0.55) }));

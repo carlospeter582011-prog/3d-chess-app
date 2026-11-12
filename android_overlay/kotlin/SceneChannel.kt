@@ -55,6 +55,10 @@ class SceneChannel(private val ctx: Context, private val engine: FlutterEngine) 
                     scene?.setShadows(call.argument<Boolean>("on") ?: true)
                     result.success(null)
                 }
+                "setRoom" -> {
+                    scene?.setRoom(call.argument<String>("name") ?: "classic")
+                    result.success(null)
+                }
                 "setLabels" -> {
                     scene?.setLabels(call.argument<Boolean>("on") ?: true)
                     result.success(null)

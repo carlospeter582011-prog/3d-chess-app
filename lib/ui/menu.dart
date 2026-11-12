@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../chess/elo.dart';
+import '../chess/types.dart';
 import '../game/game_controller.dart';
 import '../game/settings.dart';
 import 'theme.dart';
@@ -17,11 +18,13 @@ class MenuScreen extends StatelessWidget {
     super.key,
     required this.settings,
     required this.onSettings,
-    required this.saved,
+    required this.slots,
     required this.hasActive,
     required this.onStart,
     required this.onContinue,
-    required this.onResumeSaved,
+    required this.onResumeSlot,
+    required this.onDeleteSlot,
+    this.now,
     required this.onOpenSettings,
     required this.onHost,
     required this.onJoin,
@@ -29,11 +32,13 @@ class MenuScreen extends StatelessWidget {
 
   final Settings settings;
   final ValueChanged<Settings> onSettings;
-  final SavedGame? saved;
+  final List<SavedGame> slots;
+  final DateTime Function()? now;
   final bool hasActive;
   final void Function(Settings settings) onStart;
   final VoidCallback onContinue;
-  final VoidCallback onResumeSaved;
+  final void Function(SavedGame game) onResumeSlot;
+  final void Function(String id) onDeleteSlot;
   final VoidCallback onOpenSettings;
   final VoidCallback onHost;
   final VoidCallback onJoin;
@@ -156,13 +161,11 @@ class MenuScreen extends StatelessWidget {
                     GhostButton(key: const Key('lan-join'), label: '\u{1F50D} Join a game', onPressed: onJoin),
                   ] else
                     GoldButton(key: const Key('start'), label: '▶ Start new game', onPressed: () => onStart(settings)),
-                  if (!hasActive && saved != null) ...[
-                    const SizedBox(height: 10),
-                    GhostButton(
-                      key: const Key('resume-saved'),
-                      label: '↺ Continue saved game (${saved!.config.mode == GameMode.bot ? 'bot ${saved!.config.elo}' : '2 players'})',
-                      onPressed: onResumeSaved,
-                    ),
+                  if (slots.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    _Heading('Saved games (${slots.length}/$saveSlots)'),
+                    const SizedBox(height: 8),
+                    for (final g in slots) _SlotCard(game: g, now: (now ?? DateTime.now)(), onResume: () => onResumeSlot(g), onDelete: () => onDeleteSlot(g.id)),
                   ],
                   if (hasActive) ...[
                     const SizedBox(height: 10),
@@ -265,6 +268,82 @@ class _ClockPickerState extends State<_ClockPicker> {
         const Text('The clock starts after the first move. A player who runs out of time loses.', style: TextStyle(color: C.muted, fontSize: 12.5)),
       ],
     ]);
+  }
+}
+
+String slotTitle(SavedGame g) {
+  final c = g.config;
+  if (c.mode == GameMode.bot) return 'Bot ${c.elo} · you play ${c.humanColor.label}';
+  return '2 players · 1 phone';
+}
+
+String timeAgo(int ts, DateTime now) {
+  final m = now.difference(DateTime.fromMillisecondsSinceEpoch(ts)).inMinutes;
+  if (ts <= 1 || m < 0) return '';
+  if (m < 1) return 'just now';
+  if (m < 60) return '$m min ago';
+  if (m < 60 * 24) return '${m ~/ 60} h ago';
+  return '${m ~/ (60 * 24)} d ago';
+}
+
+class _SlotCard extends StatelessWidget {
+  const _SlotCard({required this.game, required this.now, required this.onResume, required this.onDelete});
+  final SavedGame game;
+  final DateTime now;
+  final VoidCallback onResume, onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final moves = (game.moves.length / 2).ceil();
+    final parts = <String>[
+      '$moves move${moves == 1 ? '' : 's'}',
+      if (game.config.timed) clockLabel(game.config.timeSec ~/ 60, game.config.incSec),
+      timeAgo(game.ts, now),
+    ].where((e) => e.isNotEmpty).toList();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: const Color(0xFF30251E),
+        borderRadius: BorderRadius.circular(12),
+        child: Row(children: [
+          Expanded(
+            child: InkWell(
+              key: Key('slot-${game.id}'),
+              borderRadius: BorderRadius.circular(12),
+              onTap: onResume,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(slotTitle(game), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 2),
+                  Text('${parts.join(' · ')}  ·  tap to continue', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: C.muted, fontSize: 12.5)),
+                ]),
+              ),
+            ),
+          ),
+          IconButton(
+            key: Key('slot-del-${game.id}'),
+            tooltip: 'Delete this game',
+            icon: const Icon(Icons.delete_outline, color: C.muted),
+            onPressed: () async {
+              final ok = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  backgroundColor: C.panelSolid,
+                  title: const Text('Delete this game?', style: TextStyle(color: C.gold2, fontSize: 18)),
+                  content: Text(slotTitle(game), style: const TextStyle(color: C.muted)),
+                  actions: [
+                    TextButton(key: const Key('slot-del-no'), onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Keep it')),
+                    TextButton(key: const Key('slot-del-yes'), onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Delete')),
+                  ],
+                ),
+              );
+              if (ok == true) onDelete();
+            },
+          ),
+        ]),
+      ),
+    );
   }
 }
 
