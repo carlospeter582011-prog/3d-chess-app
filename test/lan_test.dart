@@ -464,8 +464,8 @@ void main() {
       expect(h.snapshot.history.length, 1);
 
       final (hl2, gl2) = _FakeLink.pair();
+      gr.ctl.add(gl2); // the guest listens first, so the host's sync is not missed
       hr.ctl.add(hl2);
-      gr.ctl.add(gl2);
       await settle();
       expect(h.snapshot.linkLost, isFalse);
       expect(g.snapshot.linkLost, isFalse);

@@ -97,7 +97,7 @@ void main() {
     expect(started!.timeSec, 300);
     expect(started!.incSec, 2);
 
-    expect(host.stopped, isTrue);
+    expect(host.stopped, isFalse); // kept running: it now listens for a rejoin
   });
 
   testWidgets('host: if the guest leaves before the start the lobby goes back to waiting', (t) async {
