@@ -20,15 +20,17 @@ void main() {
       expect(g.allows(t0.add(const Duration(seconds: 30))), isFalse);
       expect(g.allows(t0.add(const Duration(minutes: 3))), isTrue);
     });
-
-    test('an App Open ad expires after 4 hours', () {
-      expect(AdGate.appOpenExpired(t0, t0.add(const Duration(hours: 3, minutes: 59))), isFalse);
-      expect(AdGate.appOpenExpired(t0, t0.add(const Duration(hours: 4))), isTrue);
-    });
   });
 
   test('uses only the Google sample ad units', () {
-    expect(AdsService.appOpenTestId, startsWith('ca-app-pub-3940256099942544/'));
-    expect(AdsService.interstitialTestId, startsWith('ca-app-pub-3940256099942544/'));
+    expect(
+      AdsService.appOpenTestId,
+      startsWith('ca-app-pub-3940256099942544/'),
+    );
+    expect(
+      AdsService.interstitialTestId,
+      startsWith('ca-app-pub-3940256099942544/'),
+    );
+    expect(AdsService.bannerTestId, startsWith('ca-app-pub-3940256099942544/'));
   });
 }

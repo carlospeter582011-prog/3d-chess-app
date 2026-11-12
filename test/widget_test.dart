@@ -1,12 +1,19 @@
 // Menu, HUD and dialogs as widgets.
 
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'package:chess3d/app.dart';
 import 'package:chess3d/chess/types.dart';
 import 'package:chess3d/chess/uci_engine.dart';
 import 'package:chess3d/game/game_controller.dart';
 import 'package:chess3d/game/settings.dart';
 import 'package:chess3d/game/storage.dart';
+import 'package:chess3d/platform/ads_service.dart';
 import 'package:chess3d/scene/board_model.dart';
+import 'package:chess3d/scene/scene_renderer.dart';
 import 'package:chess3d/ui/dialogs.dart';
+import 'package:chess3d/ui/game_banner.dart';
 import 'package:chess3d/ui/hud.dart';
 import 'package:chess3d/ui/menu.dart';
 import 'package:chess3d/ui/theme.dart';
@@ -22,6 +29,72 @@ class _NoEngine implements BotEngine {
   void resetGame() {}
   @override
   void dispose() {}
+}
+
+class _TestAds implements AdsService {
+  late bool Function() canShowLaunchAd;
+  late void Function(bool) setLaunchAdShowing;
+
+  @override
+  Future<void> initialize() async {}
+
+  @override
+  Future<void> requestLaunchAd({
+    required Duration timeout,
+    required bool Function() canShow,
+    required void Function(bool) onVisibilityChanged,
+  }) async {
+    canShowLaunchAd = canShow;
+    setLaunchAdShowing = onVisibilityChanged;
+  }
+
+  @override
+  void onGameFinished() {}
+
+  @override
+  void dispose() {}
+}
+
+class _TestRenderer implements SceneRenderer {
+  final controller = StreamController<SceneEvent>.broadcast();
+
+  @override
+  Stream<SceneEvent> get events => controller.stream;
+
+  @override
+  Future<int> create({required int width, required int height, required bool shadows}) async => 0;
+
+  @override
+  Future<void> resize(int width, int height) async {}
+
+  @override
+  Future<void> setShadows(bool on) async {}
+
+  @override
+  Future<void> setLabels(bool on) async {}
+
+  @override
+  Future<void> setRoom(String name) async {}
+
+  @override
+  void sendFrame(Float32List frame) {}
+
+  @override
+  Future<void> dispose() => controller.close();
+}
+
+ChessApp _app(_TestAds ads, _TestRenderer renderer, {bool showIntro = true}) {
+  final store = MemoryStore()..set(settingsKey, const Settings(mode: GameMode.local).encode());
+  return ChessApp(deps: AppDeps(
+    model: BoardModel(),
+    renderer: renderer,
+    engine: _NoEngine(),
+    store: store,
+    sfx: SilentSfx(),
+    ads: ads,
+    showIntro: showIntro,
+    introMinimum: const Duration(milliseconds: 100),
+  ));
 }
 
 GameController newGame() => GameController(
@@ -43,6 +116,73 @@ void useTallScreen(WidgetTester t) {
 }
 
 void main() {
+  group('App ads', () {
+    testWidgets('opens the menu without waiting for an ad and rejects a late response on resume', (t) async {
+      useTallScreen(t);
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      final ads = _TestAds();
+      final renderer = _TestRenderer();
+      addTearDown(renderer.dispose);
+      await t.pumpWidget(_app(ads, renderer));
+      expect(ads.canShowLaunchAd(), isTrue);
+
+      renderer.controller.add(const SceneLoaded());
+      await t.pump(const Duration(milliseconds: 100));
+      expect(find.byType(MenuScreen), findsOneWidget);
+      expect(ads.canShowLaunchAd(), isFalse);
+
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await t.pump();
+      expect(ads.canShowLaunchAd(), isFalse);
+    });
+
+    testWidgets('holds the intro for an ad that is already showing', (t) async {
+      useTallScreen(t);
+      t.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      final ads = _TestAds();
+      final renderer = _TestRenderer();
+      addTearDown(renderer.dispose);
+      await t.pumpWidget(_app(ads, renderer));
+      ads.setLaunchAdShowing(true);
+      renderer.controller.add(const SceneLoaded());
+      await t.pump(const Duration(milliseconds: 100));
+      expect(find.byType(MenuScreen), findsNothing);
+
+      ads.setLaunchAdShowing(false);
+      await t.pump();
+      expect(find.byType(MenuScreen), findsOneWidget);
+    });
+
+    testWidgets('offers the banner only while playing in portrait', (t) async {
+      useTallScreen(t);
+      final renderer = _TestRenderer();
+      addTearDown(renderer.dispose);
+      await t.pumpWidget(_app(_TestAds(), renderer, showIntro: false));
+      renderer.controller.add(const SceneLoaded());
+      await t.pump();
+      expect(find.byType(GameBanner), findsNothing);
+
+      final start = find.byKey(const Key('start'));
+      await t.ensureVisible(start);
+      await t.tap(start);
+      await t.pump();
+      expect(find.byType(GameBanner), findsOneWidget);
+
+      t.view.physicalSize = const Size(1000, 450);
+      await t.pump();
+      expect(find.byType(GameBanner), findsNothing);
+
+      t.view.physicalSize = const Size(450, 1000);
+      await t.pump();
+      expect(find.byType(GameBanner), findsOneWidget);
+
+      t.widget<Hud>(find.byType(Hud)).onMenu();
+      await t.pump();
+      expect(find.byType(GameBanner), findsNothing);
+    });
+  });
+
   group('Menu', () {
     Widget menu({
       required ValueNotifier<Settings> settings,

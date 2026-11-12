@@ -8,7 +8,7 @@ class LoadingScreen extends StatelessWidget {
   final String? error;
   final VoidCallback onRetry;
 
-  /// Replaces the "Loading 3D pieces" text (e.g. while the intro waits for the launch ad).
+  /// Replaces the "Loading 3D pieces" text (e.g. while the minimum intro time elapses).
   final String? message;
 
   @override

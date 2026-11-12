@@ -11,11 +11,12 @@ import 'game/game_controller.dart';
 import 'game/settings.dart';
 import 'game/storage.dart';
 import 'net/lan.dart';
+import 'platform/ads_service.dart';
 import 'scene/board_model.dart';
 import 'scene/scene_renderer.dart';
 import 'scene/scene_view.dart';
-import 'platform/ads_service.dart';
 import 'ui/dialogs.dart';
+import 'ui/game_banner.dart';
 import 'ui/hud.dart';
 import 'ui/lan_lobby.dart';
 import 'ui/loading.dart';
@@ -30,6 +31,7 @@ class AppDeps {
     required this.engine,
     required this.store,
     required this.sfx,
+    this.ads,
     this.lan = const LanServices(),
     this.autoQuality = Quality.high,
     this.showIntro = false,
@@ -40,17 +42,18 @@ class AppDeps {
   /// Preset chosen for this device at start-up; used when the setting is "Auto". Fixed for the whole session.
   final Quality autoQuality;
 
-  /// Show the intro (logo + launch ad wait) before the menu. Off in widget tests.
+  /// Show the intro (logo and board loading) before the menu. Off in widget tests.
   final bool showIntro;
   final Duration introMinimum;
 
-  /// Longest the intro waits for the App Open ad; after that the app starts without it.
+  /// Maximum time a launch ad has to load, independent of when the menu is ready.
   final Duration introAdTimeout;
   final BoardModel model;
   final SceneRenderer renderer;
   final BotEngine engine;
   final KeyValueStore store;
   final Sfx sfx;
+  final AdsService? ads;
 
   /// Two-phone play (replaced by a fake in widget tests).
   final LanServices lan;
@@ -90,12 +93,12 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
   bool _wasActive = false;
   bool? _lobbyHost; // null: closed, true: hosting, false: joining
   final math.Random _rnd = math.Random();
-  late final AdsService _ads = AdsService(
-    // an App Open ad must never cover a game in progress
-    canShowAppOpen: () =>
-        _introDone && !(game.snapshot.history.isNotEmpty && game.snapshot.status == GameStatus.playing),
-  );
-  late bool _introDone = !d.showIntro;
+  late final AdsService _ads = d.ads ?? AdsService();
+  late bool _introMinimumElapsed = !d.showIntro;
+  bool _launchAdShowing = false;
+  Timer? _introTimer;
+
+  bool get _introDone => _introMinimumElapsed && !_launchAdShowing;
 
   AppDeps get d => widget.deps;
 
@@ -112,24 +115,28 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     game.applySettings(settings);
     game.addListener(_onGame);
     if (d.showIntro) {
-      unawaited(_runIntro());
+      _runIntro();
     } else {
       unawaited(_ads.initialize());
     }
   }
 
-  /// Intro: logo screen while the 3D scene loads and the launch ad gets a limited chance to load and be shown. The
-  /// menu stays hidden (and untouchable) until this is over, so no ad can ever appear once the player is using the app.
-  Future<void> _runIntro() async {
-    await Future.wait<void>([
-      Future<void>.delayed(d.introMinimum),
-      _ads.showColdStartAd(timeout: d.introAdTimeout),
-    ]);
-    if (mounted) setState(() => _introDone = true);
+  void _runIntro() {
+    _introTimer = Timer(d.introMinimum, () => setState(() => _introMinimumElapsed = true));
+    unawaited(_ads.requestLaunchAd(
+      timeout: d.introAdTimeout,
+      canShow: () =>
+          mounted &&
+          error == null &&
+          !(ready && _introMinimumElapsed) &&
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed,
+      onVisibilityChanged: (showing) => setState(() => _launchAdShowing = showing),
+    ));
   }
 
   @override
   void dispose() {
+    _introTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     game.removeListener(_onGame);
     _ads.dispose();
@@ -141,7 +148,6 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       d.model.requestRender();
-      _ads.onResume();
     }
   }
 
@@ -236,100 +242,121 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
       backgroundColor: C.bg,
       body: LayoutBuilder(builder: (context, c) {
         final wide = c.maxWidth / c.maxHeight >= 1.25;
-        // Landscape: the button row is a bar under the board, so it never covers it.
-        final barH = (active && wide && ready) ? 58.0 + MediaQuery.paddingOf(context).bottom : 0.0;
-        return Stack(children: [
-          Positioned(
-            left: 0,
-            top: 0,
-            bottom: barH,
-            right: 0,
-            child: SceneView(
-              key: ValueKey('scene-$attempt'),
-              model: d.model,
-              renderer: d.renderer,
-              shadows: _preset.shadows,
-              renderScaleCap: _preset.renderScaleCap,
-              onTap: game.tap,
-              onEvent: _onSceneEvent,
+        final padding = MediaQuery.paddingOf(context);
+        final bannerWidth = (c.maxWidth - padding.horizontal).floor();
+        return Column(children: [
+          if (ready &&
+              _introDone &&
+              active &&
+              snap.status == GameStatus.playing &&
+              MediaQuery.orientationOf(context) == Orientation.portrait &&
+              bannerWidth > 0)
+            GameBanner(
+              key: ValueKey(bannerWidth),
+              width: bannerWidth,
+              ads: _ads,
             ),
-          ),
-          if (ready && !active)
-            Positioned.fill(
-              child: MenuScreen(
-                settings: settings,
-                onSettings: _updateSettings,
-                slots: slots,
-                hasActive: snap.history.isNotEmpty && snap.status == GameStatus.playing,
-                onStart: _start,
-                onContinue: game.resume,
-                onResumeSlot: _resumeSlot,
-                onDeleteSlot: _deleteSlot,
-                onOpenSettings: _openSettings,
-                onHost: () => setState(() => _lobbyHost = true),
-                onJoin: () => setState(() => _lobbyHost = false),
-              ),
-            ),
-          if (ready && !active && _lobbyHost != null)
-            Positioned.fill(
-              child: LanLobby(
-                key: ValueKey('lobby-$_lobbyHost'),
-                host: _lobbyHost!,
-                services: d.lan,
-                onStart: _startLan,
-                timeSec: settings.timeMin * 60,
-                incSec: settings.incSec,
-                playerName: settings.playerName,
-                onCancel: () => setState(() => _lobbyHost = null),
-              ),
-            ),
-          if (ready && active)
-            Positioned.fill(
-              child: Hud(game: game, snapshot: snap, board: d.model, onMenu: game.leave, onSettings: _openSettings, wide: wide),
-            ),
-          if (ready && active && snap.promotion != null)
-            Positioned.fill(
-              child: PromotionDialog(side: snap.turn, onChoose: game.choosePromotion, onCancel: game.cancelPromotion),
-            ),
-          if (ready && active && snap.drawOfferIn)
-            Positioned.fill(child: DrawOfferDialog(onAnswer: game.answerDraw)),
-          if (ready && active && snap.takebackIn)
-            Positioned.fill(child: TakebackOfferDialog(name: snap.opponentName, onAnswer: game.answerTakeback)),
-          if (ready && active && showResult)
-            Positioned.fill(
-              child: ResultDialog(
-                snapshot: snap,
-                onClose: () => setState(() => showResult = false),
-                onMenu: () {
-                  setState(() => showResult = false);
-                  game.leave();
-                },
-                onRematch: () {
-                  setState(() => showResult = false);
-                  if (snap.config.mode == GameMode.lan) {
-                    game.requestRematch();
-                  } else {
-                    game.start(snap.config);
-                  }
-                },
-              ),
-            ),
-          if (!ready || !_introDone)
-            Positioned.fill(
-              child: LoadingScreen(
-                message: ready ? 'Starting…' : null,
-                done: done,
-                total: total,
-                error: error,
-                onRetry: () => setState(() {
-                  error = null;
-                  done = 0;
-                  attempt++;
-                }),
-              ),
-            ),
+          Expanded(child: _gameContent(context, wide)),
         ]);
       }),
     );
+  }
+
+  Widget _gameContent(BuildContext context, bool wide) {
+    final snap = game.snapshot;
+    final active = snap.active;
+    // Landscape: the button row is a bar under the board, so it never covers it.
+    final barH = (active && wide && ready) ? 58.0 + MediaQuery.paddingOf(context).bottom : 0.0;
+    return Stack(children: [
+      Positioned(
+        left: 0,
+        top: 0,
+        bottom: barH,
+        right: 0,
+        child: SceneView(
+          key: ValueKey('scene-$attempt'),
+          model: d.model,
+          renderer: d.renderer,
+          shadows: _preset.shadows,
+          renderScaleCap: _preset.renderScaleCap,
+          onTap: game.tap,
+          onEvent: _onSceneEvent,
+        ),
+      ),
+      if (ready && _introDone && !active)
+        Positioned.fill(
+          child: MenuScreen(
+            settings: settings,
+            onSettings: _updateSettings,
+            slots: slots,
+            hasActive: snap.history.isNotEmpty && snap.status == GameStatus.playing,
+            onStart: _start,
+            onContinue: game.resume,
+            onResumeSlot: _resumeSlot,
+            onDeleteSlot: _deleteSlot,
+            onOpenSettings: _openSettings,
+            onHost: () => setState(() => _lobbyHost = true),
+            onJoin: () => setState(() => _lobbyHost = false),
+          ),
+        ),
+      if (ready && !active && _lobbyHost != null)
+        Positioned.fill(
+          child: LanLobby(
+            key: ValueKey('lobby-$_lobbyHost'),
+            host: _lobbyHost!,
+            services: d.lan,
+            onStart: _startLan,
+            timeSec: settings.timeMin * 60,
+            incSec: settings.incSec,
+            playerName: settings.playerName,
+            onCancel: () => setState(() => _lobbyHost = null),
+          ),
+        ),
+      if (ready && active)
+        Positioned.fill(
+          child: Hud(game: game, snapshot: snap, board: d.model, onMenu: game.leave, onSettings: _openSettings, wide: wide),
+        ),
+      if (ready && active && snap.promotion != null)
+        Positioned.fill(
+          child: PromotionDialog(side: snap.turn, onChoose: game.choosePromotion, onCancel: game.cancelPromotion),
+        ),
+      if (ready && active && snap.drawOfferIn)
+        Positioned.fill(child: DrawOfferDialog(onAnswer: game.answerDraw)),
+      if (ready && active && snap.takebackIn)
+        Positioned.fill(child: TakebackOfferDialog(name: snap.opponentName, onAnswer: game.answerTakeback)),
+      if (ready && active && showResult)
+        Positioned.fill(
+          child: ResultDialog(
+            snapshot: snap,
+            onClose: () => setState(() => showResult = false),
+            onMenu: () {
+              setState(() => showResult = false);
+              game.leave();
+            },
+            onRematch: () {
+              setState(() => showResult = false);
+              if (snap.config.mode == GameMode.lan) {
+                game.requestRematch();
+              } else {
+                game.start(snap.config);
+              }
+            },
+          ),
+        ),
+      if (!ready || !_introDone)
+        Positioned.fill(
+          child: LoadingScreen(
+            message: ready ? 'Starting…' : null,
+            done: done,
+            total: total,
+            error: error,
+            onRetry: () => setState(() {
+              error = null;
+              done = 0;
+              attempt++;
+            }),
+          ),
+        ),
+    ]);
   }
 }
