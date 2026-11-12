@@ -103,7 +103,7 @@ class AdsService {
 
     ad.fullScreenContentCallback = FullScreenContentCallback<AppOpenAd>(
       onAdDismissedFullScreenContent: (_) => finish(),
-      onAdFailedToShowFullScreenContent: (_, _) => finish(),
+      onAdFailedToShowFullScreenContent: (_, error) => finish(),
     );
     try {
       await ad.show();
