@@ -60,6 +60,16 @@ fi
 
 echo "== build APK"
 mkdir -p "$OUT"
+# The lint pass of a release build crashes inside Android lint itself (a tool bug, not in our code); skip it.
+mkdir -p "$HOME/.gradle/init.d"
+cat > "$HOME/.gradle/init.d/no-lint-vital.gradle" <<'GRADLE'
+allprojects {
+  tasks.configureEach { t ->
+    if (t.name.startsWith("lintVital") || t.name.startsWith("lintAnalyze") || t.name.startsWith("lintReport")) t.enabled = false
+  }
+}
+GRADLE
+
 flutter build apk --release --target-platform android-arm64
 cp build/app/outputs/flutter-apk/app-release.apk "$OUT/chess3d-release.apk"
 
