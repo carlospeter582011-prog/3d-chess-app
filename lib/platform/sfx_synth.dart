@@ -71,19 +71,37 @@ class _Part {
   const _Part(this.freq, this.dur, this.gain, this.noise, [this.offsetMs = 0, this.knock = false]);
 }
 
-const Map<String, List<_Part>> _recipes = {
-  'move': [_Part(470, 0.16, 0.95, 0.8, 0, true)],
-  'capture': [_Part(340, 0.22, 1.15, 1.1, 0, true), _Part(520, 0.13, 0.7, 0.8, 58, true)],
-  'check': [_Part(520, 0.18, 0.7, 0.2), _Part(690, 0.22, 0.6, 0.1, 110)],
-  'end': [_Part(330, 0.3, 0.7, 0.1), _Part(247, 0.4, 0.7, 0.1, 180)],
+/// Sound sets. 'wood' is the original wooden knock; 'glass' is bright and tonal; 'soft' is a muted low thud.
+const Map<String, Map<String, List<_Part>>> _packs = {
+  'wood': {
+    'move': [_Part(470, 0.16, 0.95, 0.8, 0, true)],
+    'capture': [_Part(340, 0.22, 1.15, 1.1, 0, true), _Part(520, 0.13, 0.7, 0.8, 58, true)],
+    'check': [_Part(520, 0.18, 0.7, 0.2), _Part(690, 0.22, 0.6, 0.1, 110)],
+    'end': [_Part(330, 0.3, 0.7, 0.1), _Part(247, 0.4, 0.7, 0.1, 180)],
+  },
+  'glass': {
+    'move': [_Part(1450, 0.12, 0.85, 0.12)],
+    'capture': [_Part(1100, 0.16, 1.0, 0.2), _Part(1650, 0.12, 0.6, 0.1, 45)],
+    'check': [_Part(880, 0.25, 0.7, 0.05), _Part(1175, 0.3, 0.6, 0.05, 120)],
+    'end': [_Part(660, 0.4, 0.7, 0.05), _Part(495, 0.5, 0.7, 0.05, 200)],
+  },
+  'soft': {
+    'move': [_Part(250, 0.15, 0.7, 0.3, 0, true)],
+    'capture': [_Part(200, 0.2, 0.9, 0.5, 0, true), _Part(300, 0.12, 0.5, 0.3, 50, true)],
+    'check': [_Part(392, 0.25, 0.5, 0.05), _Part(523, 0.3, 0.45, 0.05, 130)],
+    'end': [_Part(262, 0.4, 0.55, 0.05), _Part(196, 0.5, 0.55, 0.05, 220)],
+  },
 };
 
+/// Names of the sound sets.
+List<String> get soundPacks => _packs.keys.toList();
+
 /// Names of all sounds.
-List<String> get soundNames => _recipes.keys.toList();
+List<String> get soundNames => _packs['wood']!.keys.toList();
 
 /// Mono PCM samples in -1..1.
-Float64List synthesize(String name, {int seed = 7}) {
-  final parts = _recipes[name];
+Float64List synthesize(String name, {int seed = 7, String pack = 'wood'}) {
+  final parts = (_packs[pack] ?? _packs['wood']!)[name];
   if (parts == null) throw ArgumentError('unknown sound $name');
   final rnd = math.Random(seed);
   var total = 0;

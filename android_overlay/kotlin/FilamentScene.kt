@@ -79,8 +79,12 @@ class FilamentScene(
     private val resourceLoader: ResourceLoader
     private val sun: Int
     private val rim: Int
-    private val ibl: IndirectLight
-    private val skybox: Skybox
+    private var ibl: IndirectLight
+    private var skybox: Skybox
+    private var tableAsset: FilamentAsset? = null
+    private var tableName = "table"
+    private var wantedRoom = "classic"
+    private var appliedRoom = "classic"
 
     // piece slot -> instance, markers kind -> instances
     private val pieceInstances = arrayOfNulls<FilamentInstance>(6 * 2 * 16)
@@ -179,7 +183,7 @@ class FilamentScene(
 
     // ------------------------------------------------------------------ loading
     fun startLoading() {
-        tasks.add("table" to { loadStatic("table", castShadows = false) })
+        tasks.add("table" to { tableAsset = loadStatic("table", castShadows = false) })
         tasks.add("board" to { loadStatic("board", castShadows = false) })
         tasks.add("labels" to { loadLabels() })
         for (t in PIECE_NAMES.indices) {
@@ -199,6 +203,7 @@ class FilamentScene(
         if (taskIndex >= tasks.size) {
             loaded = true
             dirty = true
+            applyRoom()
             listener.onLoaded()
             return
         }
@@ -222,13 +227,14 @@ class FilamentScene(
         return buf
     }
 
-    private fun loadStatic(name: String, castShadows: Boolean) {
+    private fun loadStatic(name: String, castShadows: Boolean): FilamentAsset {
         val asset = assetLoader.createAsset(readModel(name)) ?: throw IllegalStateException("bad glTF $name")
         resourceLoader.loadResources(asset)
         asset.releaseSourceData()
         setShadowFlags(asset, castShadows, true)
         scene.addEntities(asset.entities)
         assets.add(asset)
+        return asset
     }
 
     /**
@@ -253,6 +259,66 @@ class FilamentScene(
             scene.removeEntities(a.entities)
         }
         labelsShown = labelsOn
+        dirty = true
+    }
+
+    // ------------------------------------------------------------------ rooms
+    private class RoomSpec(
+        val table: String,
+        val background: FloatArray, // linear RGB
+        val key: FloatArray, val keyIntensity: Float,
+        val rim: FloatArray, val rimIntensity: Float,
+        val ambient: FloatArray,
+    )
+
+    private val rooms = mapOf(
+        "classic" to RoomSpec("table", floatArrayOf(0.0075f, 0.0056f, 0.0044f), floatArrayOf(1.0f, 0.871f, 0.716f), 3.1f, floatArrayOf(1.0f, 0.679f, 0.434f), 0.55f, floatArrayOf(0.46f, 0.44f, 0.40f)),
+        "library" to RoomSpec("table_library", floatArrayOf(0.0060f, 0.0035f, 0.0022f), floatArrayOf(1.0f, 0.76f, 0.52f), 2.8f, floatArrayOf(1.0f, 0.679f, 0.434f), 0.35f, floatArrayOf(0.36f, 0.29f, 0.23f)),
+        "cafe" to RoomSpec("table_cafe", floatArrayOf(0.018f, 0.0145f, 0.011f), floatArrayOf(1.0f, 0.93f, 0.82f), 3.4f, floatArrayOf(1.0f, 0.80f, 0.60f), 0.7f, floatArrayOf(0.62f, 0.58f, 0.52f)),
+        "night" to RoomSpec("table_night", floatArrayOf(0.0016f, 0.0026f, 0.0060f), floatArrayOf(0.62f, 0.74f, 1.0f), 2.3f, floatArrayOf(0.45f, 0.58f, 1.0f), 0.5f, floatArrayOf(0.22f, 0.27f, 0.40f)),
+    )
+
+    fun setRoom(name: String) {
+        wantedRoom = name
+        if (loaded) applyRoom()
+    }
+
+    /** Swaps table model, background and lights. A failure leaves the scene as it was (never crashes the game). */
+    private fun applyRoom() {
+        val spec = rooms[wantedRoom] ?: return
+        if (destroyed || wantedRoom == appliedRoom) return
+        try {
+            val lm = engine.lightManager
+            lm.setColor(lm.getInstance(sun), spec.key[0], spec.key[1], spec.key[2])
+            lm.setIntensity(lm.getInstance(sun), spec.keyIntensity)
+            lm.setColor(lm.getInstance(rim), spec.rim[0], spec.rim[1], spec.rim[2])
+            lm.setIntensity(lm.getInstance(rim), spec.rimIntensity)
+
+            val oldSky = skybox
+            skybox = Skybox.Builder().color(spec.background[0], spec.background[1], spec.background[2], 1f).build(engine)
+            scene.skybox = skybox
+            val oldIbl = ibl
+            ibl = IndirectLight.Builder().irradiance(1, spec.ambient).intensity(1.0f).build(engine)
+            scene.indirectLight = ibl
+
+            var oldTable: FilamentAsset? = null
+            if (spec.table != tableName) {
+                oldTable = tableAsset
+                tableAsset = loadStatic(spec.table, castShadows = false)
+                tableName = spec.table
+                if (oldTable != null) scene.removeEntities(oldTable.entities)
+            }
+            engine.flushAndWait()
+            engine.destroySkybox(oldSky)
+            engine.destroyIndirectLight(oldIbl)
+            if (oldTable != null) {
+                assetLoader.destroyAsset(oldTable)
+                assets.remove(oldTable)
+            }
+            appliedRoom = wantedRoom
+        } catch (e: Throwable) {
+            android.util.Log.w("chess3d", "room change failed: $e")
+        }
         dirty = true
     }
 

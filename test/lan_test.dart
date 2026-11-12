@@ -40,6 +40,7 @@ class _FakeLink implements RemoteLink {
   final Completer<void> _done = Completer<void>();
   bool _open = true;
   final List<Map<String, dynamic>> sent = [];
+  bool drop = false; // simulates a message lost on the way
 
   static (_FakeLink, _FakeLink) pair() {
     final a = _FakeLink(), b = _FakeLink();
@@ -58,7 +59,7 @@ class _FakeLink implements RemoteLink {
   void send(Map<String, dynamic> m) {
     if (!_open) return;
     sent.add(m);
-    peer._in.add(m);
+    if (!drop) peer._in.add(m);
   }
 
   void _end() {
@@ -72,6 +73,17 @@ class _FakeLink implements RemoteLink {
     _end();
     peer._end();
   }
+}
+
+class _FakeReconnect implements LanReconnect {
+  final StreamController<RemoteLink> ctl = StreamController.broadcast(sync: true);
+  bool started = false, stopped = false;
+  @override
+  Stream<RemoteLink> get links => ctl.stream;
+  @override
+  Future<void> start() async => started = true;
+  @override
+  Future<void> stop() async => stopped = true;
 }
 
 Future<void> settle() => Future<void>.delayed(const Duration(milliseconds: 20));
@@ -140,6 +152,78 @@ void main() {
       final empty = await scanner.games.firstWhere((l) => l.isEmpty).timeout(const Duration(seconds: 5));
       expect(empty, isEmpty);
       await scanner.stop();
+    });
+    test('a guest that lost its connection can come back with the game secret; strangers cannot', () async {
+      final host = LanHost(name: 'Rejoin', discoveryPort: 47894, debugTargets: const []);
+      await host.start();
+      final ad = LanAdvert(id: host.id, name: 'Rejoin', address: '127.0.0.1', port: host.port);
+      final first = host.guests.first;
+      final link = await joinLanGame(ad, name: 'Lee');
+      final g1 = await first.timeout(const Duration(seconds: 5));
+      host.lock('secret-1');
+      await link.close();
+      await g1.link.done.timeout(const Duration(seconds: 5));
+
+      await expectLater(joinLanGame(ad, name: 'Stranger'), throwsA(isA<LanJoinException>()));
+      await expectLater(joinLanGame(ad, name: 'Stranger', sid: 'wrong'), throwsA(isA<LanJoinException>()));
+
+      final back = host.guests.first;
+      final link2 = await joinLanGame(ad, name: 'Lee', sid: 'secret-1');
+      final g2 = await back.timeout(const Duration(seconds: 5));
+      expect(g2.name, 'Lee');
+      final got = g2.link.messages.first;
+      link2.send({'t': 'sync', 'moves': ['e2e4']});
+      expect((await got.timeout(const Duration(seconds: 5)))['t'], 'sync');
+      await link2.close();
+      await host.stop();
+    });
+
+    test('before the game starts, a visitor with a secret is turned away', () async {
+      final host = LanHost(name: 'Early', discoveryPort: 47895, debugTargets: const []);
+      await host.start();
+      final ad = LanAdvert(id: host.id, name: 'Early', address: '127.0.0.1', port: host.port);
+      await expectLater(joinLanGame(ad, sid: 'anything'), throwsA(isA<LanJoinException>()));
+      await host.stop();
+    });
+
+    test('GuestReconnect keeps trying until the host answers, then stops', () async {
+      var tries = 0;
+      final link = _FakeLink();
+      final r = GuestReconnect(
+        ad: const LanAdvert(id: 'x', name: 'x', address: '1.2.3.4', port: 1),
+        sid: 's',
+        name: 'Lee',
+        retryEvery: const Duration(milliseconds: 5),
+        join: (ad, name, sid) async {
+          tries++;
+          if (tries < 3) throw LanJoinException('no');
+          expect(sid, 's');
+          return link;
+        },
+      );
+      final got = r.links.first;
+      await r.start();
+      expect(await got, same(link));
+      expect(tries, 3);
+      await r.stop();
+    });
+
+    test('GuestReconnect gives up after the time limit', () async {
+      var tries = 0;
+      final r = GuestReconnect(
+        ad: const LanAdvert(id: 'x', name: 'x', address: '1.2.3.4', port: 1),
+        sid: 's',
+        name: 'Lee',
+        retryEvery: const Duration(milliseconds: 5),
+        giveUpAfter: const Duration(milliseconds: 60),
+        join: (ad, name, sid) async {
+          tries++;
+          throw LanJoinException('no');
+        },
+      );
+      await r.start();
+      expect(tries, greaterThan(1));
+      await r.stop();
     });
   });
 
@@ -248,6 +332,155 @@ void main() {
       g.dispose();
     });
 
+    test('names of both players are shown', () async {
+      final (hl, gl) = _FakeLink.pair();
+      final h = newGame(), g = newGame();
+      h.startLan(hl, Side.w, isHost: true, myName: 'Sam', oppName: 'Lee');
+      g.startLan(gl, Side.b, isHost: false, myName: 'Lee', oppName: 'Sam');
+      expect(h.snapshot.opponentName, 'Lee');
+      expect(g.snapshot.opponentName, 'Sam');
+      h.dispose();
+      g.dispose();
+    });
+
+    test('take back: my last move goes back on both phones when the opponent allows it', () async {
+      final (h, g, _, _) = startPair();
+      expect(h.snapshot.canTakeback, isFalse); // nothing to take back yet
+      h.tap('e2');
+      h.tap('e4');
+      await settle();
+      expect(h.snapshot.canTakeback, isTrue);
+      expect(g.snapshot.canTakeback, isFalse); // Black has not moved: cannot ask
+      h.requestTakeback();
+      await settle();
+      expect(h.snapshot.takebackOut, isTrue);
+      expect(g.snapshot.takebackIn, isTrue);
+      h.tap('d2'); // no moves while waiting for the answer
+      h.tap('d4');
+      await settle();
+      expect(h.snapshot.history.length, 1);
+      g.answerTakeback(true);
+      await settle();
+      expect(h.snapshot.history, isEmpty);
+      expect(g.snapshot.history, isEmpty);
+      expect(h.snapshot.turn, Side.w);
+      expect(g.snapshot.takebackIn, isFalse);
+      h.dispose();
+      g.dispose();
+    });
+
+    test('take back after the reply: both moves go back', () async {
+      final (h, g, _, _) = startPair();
+      h.tap('e2');
+      h.tap('e4');
+      await settle();
+      g.tap('e7');
+      g.tap('e5');
+      await settle();
+      h.requestTakeback(); // White's move was answered, so both half-moves go
+      await settle();
+      g.answerTakeback(true);
+      await settle();
+      expect(h.snapshot.history, isEmpty);
+      expect(g.snapshot.history, isEmpty);
+      h.dispose();
+      g.dispose();
+    });
+
+    test('Black can take back just their own last move', () async {
+      final (h, g, _, _) = startPair();
+      h.tap('e2');
+      h.tap('e4');
+      await settle();
+      g.tap('e7');
+      g.tap('e5');
+      await settle();
+      g.requestTakeback();
+      await settle();
+      h.answerTakeback(true);
+      await settle();
+      expect(h.snapshot.history.length, 1);
+      expect(g.snapshot.history.length, 1);
+      expect(g.snapshot.turn, Side.b);
+      h.dispose();
+      g.dispose();
+    });
+
+    test('a declined take-back is reported and play goes on', () async {
+      final (h, g, _, _) = startPair();
+      h.tap('e2');
+      h.tap('e4');
+      await settle();
+      h.requestTakeback();
+      await settle();
+      g.answerTakeback(false);
+      await settle();
+      expect(h.snapshot.takebackOut, isFalse);
+      expect(h.snapshot.notice, 'Take-back declined');
+      expect(h.snapshot.history.length, 1);
+      g.tap('e7');
+      g.tap('e5');
+      await settle();
+      expect(h.snapshot.history.length, 2);
+      expect(h.snapshot.notice, isNull);
+      h.dispose();
+      g.dispose();
+    });
+
+    test('a take-back request that no longer matches the position is declined by itself', () async {
+      final (h, g, hl, _) = startPair();
+      h.tap('e2');
+      h.tap('e4');
+      await settle();
+      g.tap('e7');
+      g.tap('e5'); // the guest moves...
+      await settle();
+      hl.send({'t': 'tb', 'a': 'req', 'n': 1}); // ...but the host's request still refers to the old position
+      await settle();
+      expect(g.snapshot.takebackIn, isFalse);
+      h.dispose();
+      g.dispose();
+    });
+
+    test('a lost connection comes back and a move lost on the way is recovered', () async {
+      final (hl, gl) = _FakeLink.pair();
+      final hr = _FakeReconnect(), gr = _FakeReconnect();
+      final h = newGame(), g = newGame();
+      h.startLan(hl, Side.w, isHost: true, reconnect: hr);
+      g.startLan(gl, Side.b, isHost: false, reconnect: gr);
+      hl.drop = true; // White's move is lost on the way, then the connection drops
+      h.tap('e2');
+      h.tap('e4');
+      await settle();
+      expect(g.snapshot.history, isEmpty);
+      await hl.close();
+      await settle();
+      expect(h.snapshot.linkLost, isTrue);
+      expect(g.snapshot.linkLost, isTrue);
+      expect(gr.started, isTrue); // the guest starts trying to get back
+      h.tap('d2'); // nobody can move while the connection is down
+      h.tap('d4');
+      await settle();
+      expect(h.snapshot.history.length, 1);
+
+      final (hl2, gl2) = _FakeLink.pair();
+      hr.ctl.add(hl2);
+      gr.ctl.add(gl2);
+      await settle();
+      expect(h.snapshot.linkLost, isFalse);
+      expect(g.snapshot.linkLost, isFalse);
+      expect(g.snapshot.history.length, 1); // synced
+      expect(g.snapshot.turn, Side.b);
+      g.tap('e7');
+      g.tap('e5');
+      await settle();
+      expect(h.snapshot.history.length, 2);
+      h.dispose();
+      g.dispose();
+      expect(hr.stopped, isTrue);
+      expect(gr.stopped, isTrue);
+    });
+
     test('leaving closes the link', () async {
       final (h, _, hl, gl) = startPair();
       h.leave();
@@ -343,7 +576,7 @@ void main() {
       await settle();
       advance(7);
       g.leave();
-      final saved = GameController.loadSaved(store)!;
+      final saved = GameController.loadSlots(store).single;
       expect(saved.config.timeSec, 120);
       expect(saved.config.incSec, 1);
       expect(saved.whiteMs, 121000);

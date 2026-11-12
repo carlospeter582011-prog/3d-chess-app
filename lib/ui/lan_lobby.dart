@@ -11,13 +11,13 @@ import '../net/lan.dart';
 import 'menu.dart' show clockLabel;
 import 'theme.dart';
 
-/// Called when the game is ready: the link, which side this phone plays, and whether this phone is the host.
-typedef LanStart = void Function(RemoteLink link, Side mySide, bool isHost, int timeSec, int incSec);
+/// Called when the game is ready.
+typedef LanStart = void Function(LanSetup setup);
 
 Side _sideOf(String? ch) => ch == 'b' ? Side.b : Side.w;
 
 class LanLobby extends StatefulWidget {
-  const LanLobby({super.key, required this.host, required this.services, required this.onStart, required this.onCancel, this.rnd, this.timeSec = 0, this.incSec = 0});
+  const LanLobby({super.key, required this.host, required this.services, required this.onStart, required this.onCancel, this.rnd, this.timeSec = 0, this.incSec = 0, this.playerName = ''});
   final bool host;
   final LanServices services;
   final LanStart onStart;
@@ -26,6 +26,9 @@ class LanLobby extends StatefulWidget {
 
   /// Host only: the clock chosen in the menu, sent to the guest with the start message.
   final int timeSec, incSec;
+
+  /// This player's name, shown to the other phone.
+  final String playerName;
 
   @override
   State<LanLobby> createState() => _LanLobbyState();
@@ -46,6 +49,9 @@ class _LanLobbyState extends State<LanLobby> {
   StreamSubscription<Map<String, dynamic>>? _linkSub;
   String? _error;
   bool _handedOver = false;
+  LanAdvert? _ad;
+
+  String get _me => widget.playerName.trim().isEmpty ? 'Player' : widget.playerName.trim();
 
   @override
   void initState() {
@@ -55,7 +61,7 @@ class _LanLobbyState extends State<LanLobby> {
 
   Future<void> _startHosting() async {
     try {
-      final h = widget.services.makeHost();
+      final h = widget.services.makeHost(widget.playerName.trim().isEmpty ? randomGameName(widget.rnd) : "${widget.playerName.trim()}'s game");
       _host = h;
       await h.start();
       if (!mounted) return;
@@ -97,10 +103,22 @@ class _LanLobbyState extends State<LanLobby> {
       HumanColor.black => Side.b,
       HumanColor.random => (widget.rnd ?? math.Random()).nextBool() ? Side.w : Side.b,
     };
-    g.link.send({'t': 'start', 'you': hostSide.other.ch, 'time': widget.timeSec, 'inc': widget.incSec});
+    // a secret only these two phones know, so the guest (and nobody else) can come back after a dropped connection
+    final r = widget.rnd ?? math.Random();
+    final sid = '${DateTime.now().microsecondsSinceEpoch}-${r.nextInt(1 << 30)}-${r.nextInt(1 << 30)}';
+    g.link.send({'t': 'start', 'you': hostSide.other.ch, 'time': widget.timeSec, 'inc': widget.incSec, 'sid': sid, 'host': _me});
     _handedOver = true;
-    unawaited(_host?.stop());
-    widget.onStart(g.link, hostSide, true, widget.timeSec, widget.incSec);
+    final host = _host;
+    widget.onStart(LanSetup(
+      link: g.link,
+      mySide: hostSide,
+      isHost: true,
+      timeSec: widget.timeSec,
+      incSec: widget.incSec,
+      myName: _me,
+      oppName: g.name,
+      reconnect: host == null ? null : HostReconnect(host, sid),
+    ));
   }
 
   Future<void> _join(LanAdvert ad) async {
@@ -110,7 +128,8 @@ class _LanLobbyState extends State<LanLobby> {
       _error = null;
     });
     try {
-      final link = await widget.services.join(ad);
+      _ad = ad;
+      final link = await widget.services.join(ad, _me);
       if (!mounted) {
         unawaited(link.close());
         return;
@@ -120,8 +139,17 @@ class _LanLobbyState extends State<LanLobby> {
         if (m['t'] == 'start' && !_handedOver) {
           _handedOver = true;
           unawaited(_scanner?.stop());
-          final t = m['time'], i = m['inc'];
-          widget.onStart(link, _sideOf(m['you'] as String?), false, t is num ? t.round() : 0, i is num ? i.round() : 0);
+          final t = m['time'], i = m['inc'], sid = m['sid'], hostName = m['host'];
+          widget.onStart(LanSetup(
+            link: link,
+            mySide: _sideOf(m['you'] as String?),
+            isHost: false,
+            timeSec: t is num ? t.round() : 0,
+            incSec: i is num ? i.round() : 0,
+            myName: _me,
+            oppName: hostName is String && hostName.isNotEmpty ? hostName : ad.name,
+            reconnect: sid is String ? GuestReconnect(ad: ad, sid: sid, name: _me) : null,
+          ));
         } else if (m['t'] == 'bye') {
           _leftHost();
         }
@@ -165,7 +193,7 @@ class _LanLobbyState extends State<LanLobby> {
     _guestSub?.cancel();
     _scanSub?.cancel();
     _linkSub?.cancel();
-    unawaited(_host?.stop());
+    if (!_handedOver) unawaited(_host?.stop()); // after the start the running game owns the host
     unawaited(_scanner?.stop());
     super.dispose();
   }

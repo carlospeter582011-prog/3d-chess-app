@@ -80,7 +80,7 @@ class AppRoot extends StatefulWidget {
 class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
   late final GameController game;
   late Settings settings;
-  SavedGame? saved;
+  List<SavedGame> slots = const [];
   bool ready = false;
   int done = 0, total = 13;
   String? error;
@@ -107,7 +107,7 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     settings = Settings.decode(d.store.get(settingsKey));
-    saved = GameController.loadSaved(d.store);
+    slots = GameController.loadSlots(d.store);
     game = GameController(board: d.model, engine: d.engine, store: d.store, sfx: d.sfx);
     game.applySettings(settings);
     game.addListener(_onGame);
@@ -163,6 +163,7 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
       _wasActive = s.active;
       d.model.setAutoRotate(!s.active);
     }
+    if (!s.active) slots = GameController.loadSlots(d.store); // the menu shows the saved games
     if (mounted) setState(() {});
   }
 
@@ -187,9 +188,14 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
   }
 
   void _updateSettings(Settings s) {
+    final old = settings;
     setState(() => settings = s);
     d.store.set(settingsKey, s.encode());
     game.applySettings(s);
+    // let the player hear / feel what they just chose
+    if (s.soundPack != old.soundPack || (s.haptics && !old.haptics)) {
+      unawaited(d.sfx.setPack(s.soundPack.name).then((_) => d.sfx.move()));
+    }
   }
 
   void _start(Settings s) {
@@ -198,22 +204,21 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
       HumanColor.black => Side.b,
       HumanColor.random => _rnd.nextBool() ? Side.w : Side.b,
     };
-    GameController.clearSaved(d.store);
-    saved = null;
     game.start(GameConfig(mode: s.mode, humanColor: human, elo: s.elo, timeSec: s.timeMin * 60, incSec: s.incSec));
   }
 
-  void _startLan(RemoteLink link, Side mySide, bool isHost, int timeSec, int incSec) {
-    GameController.clearSaved(d.store);
-    saved = null;
+  void _startLan(LanSetup s) {
     setState(() => _lobbyHost = null);
-    game.startLan(link, mySide, isHost: isHost, timeSec: timeSec, incSec: incSec);
+    game.startLan(s.link, s.mySide, isHost: s.isHost, timeSec: s.timeSec, incSec: s.incSec, myName: s.myName, oppName: s.oppName, reconnect: s.reconnect);
   }
 
-  void _resumeSaved() {
-    final sv = saved;
-    if (sv == null) return;
-    game.start(sv.config, moves: sv.moves, whiteMs: sv.whiteMs, blackMs: sv.blackMs);
+  void _resumeSlot(SavedGame sv) {
+    game.start(sv.config, moves: sv.moves, whiteMs: sv.whiteMs, blackMs: sv.blackMs, slotId: sv.id);
+  }
+
+  void _deleteSlot(String id) {
+    GameController.deleteSlot(d.store, id);
+    setState(() => slots = GameController.loadSlots(d.store));
   }
 
   void _openSettings() {
@@ -255,11 +260,12 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
               child: MenuScreen(
                 settings: settings,
                 onSettings: _updateSettings,
-                saved: saved,
+                slots: slots,
                 hasActive: snap.history.isNotEmpty && snap.status == GameStatus.playing,
                 onStart: _start,
                 onContinue: game.resume,
-                onResumeSaved: _resumeSaved,
+                onResumeSlot: _resumeSlot,
+                onDeleteSlot: _deleteSlot,
                 onOpenSettings: _openSettings,
                 onHost: () => setState(() => _lobbyHost = true),
                 onJoin: () => setState(() => _lobbyHost = false),
@@ -274,6 +280,7 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
                 onStart: _startLan,
                 timeSec: settings.timeMin * 60,
                 incSec: settings.incSec,
+                playerName: settings.playerName,
                 onCancel: () => setState(() => _lobbyHost = null),
               ),
             ),
@@ -284,10 +291,10 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
                     top: 0,
                     bottom: 0,
                     width: panelWidth,
-                    child: Hud(game: game, snapshot: snap, board: d.model, onMenu: game.leave, onSettings: _openSettings, wide: true, showMoves: settings.showMoves, showCaptured: settings.showCaptured),
+                    child: Hud(game: game, snapshot: snap, board: d.model, onMenu: game.leave, onSettings: _openSettings, wide: true),
                   )
                 : Positioned.fill(
-                    child: Hud(game: game, snapshot: snap, board: d.model, onMenu: game.leave, onSettings: _openSettings, showMoves: settings.showMoves, showCaptured: settings.showCaptured),
+                    child: Hud(game: game, snapshot: snap, board: d.model, onMenu: game.leave, onSettings: _openSettings),
                   ),
           if (ready && active && snap.promotion != null)
             Positioned.fill(
@@ -295,6 +302,8 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
             ),
           if (ready && active && snap.drawOfferIn)
             Positioned.fill(child: DrawOfferDialog(onAnswer: game.answerDraw)),
+          if (ready && active && snap.takebackIn)
+            Positioned.fill(child: TakebackOfferDialog(name: snap.opponentName, onAnswer: game.answerTakeback)),
           if (ready && active && showResult)
             Positioned.fill(
               child: ResultDialog(

@@ -30,6 +30,12 @@ class GraphicsPreset {
       };
 }
 
+/// The scene around the board: the table, the walls' colour and the light.
+enum Room { classic, library, cafe, night }
+
+/// Sound effect sets for moves, captures and check.
+enum SoundPack { wood, glass, soft }
+
 /// What the menu stores for "your colour": a side or a random pick.
 enum HumanColor { white, black, random }
 
@@ -64,6 +70,11 @@ class GameConfig {
   int get hashCode => Object.hash(mode, humanColor, elo, timeSec, incSec);
 }
 
+String _cleanName(String s) {
+  final t = s.trim();
+  return t.length > 16 ? t.substring(0, 16) : t;
+}
+
 class Settings {
   final bool sound;
   final bool labels;
@@ -71,8 +82,6 @@ class Settings {
   final bool autoFlip;
 
   /// Move list and captured pieces are hidden unless the player turns them on.
-  final bool showMoves;
-  final bool showCaptured;
   final int elo;
   final HumanColor humanColor;
   final GameMode mode;
@@ -80,18 +89,28 @@ class Settings {
   /// Chess clock for new games: minutes per player (0 = off) and increment in seconds.
   final int timeMin, incSec;
 
+  /// Shown to the other player in two-phone games.
+  final String playerName;
+
+  /// Optional extras, all in Settings: room, sound set, vibration on moves.
+  final Room room;
+  final SoundPack soundPack;
+  final bool haptics;
+
   const Settings({
     this.sound = true,
     this.labels = true,
     this.quality = Quality.auto,
     this.autoFlip = false,
-    this.showMoves = false,
-    this.showCaptured = false,
     this.elo = 1200,
     this.humanColor = HumanColor.white,
     this.mode = GameMode.bot,
     this.timeMin = 0,
     this.incSec = 0,
+    this.playerName = '',
+    this.room = Room.classic,
+    this.soundPack = SoundPack.wood,
+    this.haptics = false,
   });
 
   Settings copyWith({
@@ -99,26 +118,30 @@ class Settings {
     bool? labels,
     Quality? quality,
     bool? autoFlip,
-    bool? showMoves,
-    bool? showCaptured,
     int? elo,
     HumanColor? humanColor,
     GameMode? mode,
     int? timeMin,
     int? incSec,
+    String? playerName,
+    Room? room,
+    SoundPack? soundPack,
+    bool? haptics,
   }) =>
       Settings(
         sound: sound ?? this.sound,
         labels: labels ?? this.labels,
         quality: quality ?? this.quality,
         autoFlip: autoFlip ?? this.autoFlip,
-        showMoves: showMoves ?? this.showMoves,
-        showCaptured: showCaptured ?? this.showCaptured,
         elo: elo ?? this.elo,
         humanColor: humanColor ?? this.humanColor,
         mode: mode ?? this.mode,
         timeMin: timeMin ?? this.timeMin,
         incSec: incSec ?? this.incSec,
+        playerName: playerName ?? this.playerName,
+        room: room ?? this.room,
+        soundPack: soundPack ?? this.soundPack,
+        haptics: haptics ?? this.haptics,
       );
 
   String encode() => jsonEncode({
@@ -126,13 +149,15 @@ class Settings {
         'labels': labels,
         'quality': quality.name,
         'autoFlip': autoFlip,
-        'showMoves': showMoves,
-        'showCaptured': showCaptured,
         'elo': elo,
         'humanColor': humanColor.name,
         'mode': mode.name,
         'timeMin': timeMin,
         'incSec': incSec,
+        'playerName': playerName,
+        'room': room.name,
+        'soundPack': soundPack.name,
+        'haptics': haptics,
       });
 
   /// Tolerant decoding: anything missing or malformed falls back to the default.
@@ -153,13 +178,15 @@ class Settings {
         labels: j['labels'] is bool ? j['labels'] as bool : true,
         quality: pick(Quality.values, j['quality'], Quality.auto),
         autoFlip: j['autoFlip'] is bool ? j['autoFlip'] as bool : false,
-        showMoves: j['showMoves'] is bool ? j['showMoves'] as bool : false,
-        showCaptured: j['showCaptured'] is bool ? j['showCaptured'] as bool : false,
         elo: j['elo'] is num ? (j['elo'] as num).round().clamp(400, 3200) : 1200,
         humanColor: pick(HumanColor.values, j['humanColor'], HumanColor.white),
         mode: pick(GameMode.values, j['mode'], GameMode.bot),
         timeMin: j['timeMin'] is num ? (j['timeMin'] as num).round().clamp(0, 180) : 0,
         incSec: j['incSec'] is num ? (j['incSec'] as num).round().clamp(0, 60) : 0,
+        playerName: j['playerName'] is String ? _cleanName(j['playerName'] as String) : '',
+        room: pick(Room.values, j['room'], Room.classic),
+        soundPack: pick(SoundPack.values, j['soundPack'], SoundPack.wood),
+        haptics: j['haptics'] is bool ? j['haptics'] as bool : false,
       );
     } catch (_) {
       return const Settings();

@@ -44,8 +44,8 @@ class Rig {
   final SilentSfx sfx = SilentSfx();
   late final GameController game;
 
-  Rig([List<String?>? bot]) : engine = FakeEngine(bot) {
-    game = GameController(board: board, engine: engine, store: store, sfx: sfx, thinkMinimum: Duration.zero);
+  Rig([List<String?>? bot, DateTime Function()? now]) : engine = FakeEngine(bot) {
+    game = GameController(board: board, engine: engine, store: store, sfx: sfx, thinkMinimum: Duration.zero, now: now);
   }
 
   GameSnapshot get s => game.snapshot;
@@ -550,9 +550,15 @@ void main() {
       r.game.start(local);
       await r.play('e2', 'e4');
       await r.play('e7', 'e5');
-      final saved = GameController.loadSaved(r.store)!;
+      final saved = GameController.loadSlots(r.store).single;
       expect(saved.moves, ['e2e4', 'e7e5']);
       expect(saved.config, local);
+    });
+
+    test('a new game with no moves does not take a slot', () {
+      final r = Rig();
+      r.game.start(local);
+      expect(GameController.loadSlots(r.store), isEmpty);
     });
 
     test('resuming restores the exact position on the board', () async {
@@ -560,10 +566,10 @@ void main() {
       r.game.start(local);
       await r.play('e2', 'e4');
       await r.play('g8', 'f6');
-      final saved = GameController.loadSaved(r.store)!;
+      final saved = GameController.loadSlots(r.store).single;
 
       final r2 = Rig();
-      r2.game.start(saved.config, moves: saved.moves);
+      r2.game.start(saved.config, moves: saved.moves, slotId: saved.id);
       expect(r2.s.history, ['e4', 'Nf6']);
       expect(r2.s.fen, r.s.fen);
       r2.expectBoardMatchesRules();
@@ -578,15 +584,15 @@ void main() {
 
     test('a corrupted save is ignored instead of crashing', () {
       final store = MemoryStore();
-      for (final bad in ['not json', '[]', '{"config":{},"moves":"x"}', '{"config":{"mode":"bot"},"moves":["e2e5"]}', '{"moves":[]}']) {
-        store.set(saveKey, bad);
-        expect(GameController.loadSaved(store), isNull, reason: bad);
+      for (final bad in ['not json', '{}', '[1,"x",{"config":{},"moves":"x"}]', '[{"id":"a","config":{"mode":"bot"},"moves":["e2e5"]}]', '[{"moves":[]}]']) {
+        store.set(slotsKey, bad);
+        expect(GameController.loadSlots(store), isEmpty, reason: bad);
       }
     });
 
     test('a save with an illegal move in the middle is ignored', () {
-      final store = MemoryStore()..set(saveKey, '{"config":{"mode":"local","humanColor":"w","elo":1200},"moves":["e2e4","e2e4"]}');
-      expect(GameController.loadSaved(store), isNull);
+      final store = MemoryStore()..set(slotsKey, '[{"id":"a","ts":5,"config":{"mode":"local","humanColor":"w","elo":1200},"moves":["e2e4","e2e4"]}]');
+      expect(GameController.loadSlots(store), isEmpty);
     });
 
     test('starting with an illegal move list falls back to a new game', () {
@@ -595,12 +601,84 @@ void main() {
       expect(r.s.fen, Chess.startFen);
     });
 
-    test('clearSaved removes it', () async {
+    test('three games are kept side by side, newest first', () async {
+      var t = DateTime(2026, 1, 1);
+      final r = Rig(null, () => t);
+      for (final first in ['e2e4', 'd2d4', 'c2c4']) {
+        t = t.add(const Duration(minutes: 1));
+        r.game.start(local);
+        await r.play(first.substring(0, 2), first.substring(2));
+      }
+      final slots = GameController.loadSlots(r.store);
+      expect(slots.map((g) => g.moves.first), ['c2c4', 'd2d4', 'e2e4']);
+      expect(slots.map((g) => g.id).toSet().length, 3);
+    });
+
+    test('a fourth game replaces the one played longest ago', () async {
+      var t = DateTime(2026, 1, 1);
+      final r = Rig(null, () => t);
+      for (final first in ['e2e4', 'd2d4', 'c2c4', 'g1f3']) {
+        t = t.add(const Duration(minutes: 1));
+        r.game.start(local);
+        await r.play(first.substring(0, 2), first.substring(2));
+      }
+      final slots = GameController.loadSlots(r.store);
+      expect(slots.map((g) => g.moves.first), ['g1f3', 'c2c4', 'd2d4']);
+    });
+
+    test('continuing a saved game updates its own slot instead of adding another', () async {
+      var t = DateTime(2026, 1, 1);
+      final r = Rig(null, () => t);
+      r.game.start(local);
+      t = t.add(const Duration(minutes: 1));
+      await r.play('e2', 'e4');
+      final first = GameController.loadSlots(r.store).single;
+      r.game.start(local);
+      t = t.add(const Duration(minutes: 1));
+      await r.play('d2', 'd4');
+      expect(GameController.loadSlots(r.store).length, 2);
+      r.game.start(first.config, moves: first.moves, slotId: first.id);
+      t = t.add(const Duration(minutes: 1));
+      await r.play('e7', 'e5');
+      final slots = GameController.loadSlots(r.store);
+      expect(slots.length, 2);
+      expect(slots.first.moves, ['e2e4', 'e7e5']);
+    });
+
+    test('deleteSlot removes just that game', () async {
+      var t = DateTime(2026, 1, 1);
+      final r = Rig(null, () => t);
+      r.game.start(local);
+      t = t.add(const Duration(minutes: 1));
+      await r.play('e2', 'e4');
+      r.game.start(local);
+      t = t.add(const Duration(minutes: 1));
+      await r.play('d2', 'd4');
+      final slots = GameController.loadSlots(r.store);
+      GameController.deleteSlot(r.store, slots.last.id);
+      final left = GameController.loadSlots(r.store);
+      expect(left.length, 1);
+      expect(left.single.moves, ['d2d4']);
+      GameController.deleteSlot(r.store, left.single.id);
+      expect(GameController.loadSlots(r.store), isEmpty);
+    });
+
+    test('a finished game is removed from its slot', () async {
       final r = Rig();
       r.game.start(local);
       await r.play('e2', 'e4');
-      GameController.clearSaved(r.store);
-      expect(GameController.loadSaved(r.store), isNull);
+      expect(GameController.loadSlots(r.store).length, 1);
+      r.game.resign();
+      expect(GameController.loadSlots(r.store), isEmpty);
+    });
+
+    test('the old single save is moved into the first slot, and stays gone once deleted', () {
+      final store = MemoryStore()..set(saveKey, '{"config":{"mode":"local","humanColor":"w","elo":1200},"moves":["e2e4"]}');
+      final slots = GameController.loadSlots(store);
+      expect(slots.length, 1);
+      expect(slots.single.moves, ['e2e4']);
+      GameController.deleteSlot(store, slots.single.id);
+      expect(GameController.loadSlots(store), isEmpty);
     });
   });
 

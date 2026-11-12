@@ -50,6 +50,7 @@ class _SceneViewState extends State<SceneView> with SingleTickerProviderStateMix
   int _texW = 0, _texH = 0;
   final ValueNotifier<int> _frame = ValueNotifier<int>(0);
   bool _labelsSent = true; // the native scene starts with the labels shown
+  String _roomSent = 'classic'; // ... and in the classic room
 
   // pointer tracking
   final Map<int, Offset> _pointers = {};
@@ -100,6 +101,11 @@ class _SceneViewState extends State<SceneView> with SingleTickerProviderStateMix
     if (_ready && _labelsSent != widget.model.labelsVisible) {
       _labelsSent = widget.model.labelsVisible;
       unawaited(widget.renderer.setLabels(_labelsSent));
+      widget.model.requestRender();
+    }
+    if (_ready && _roomSent != widget.model.room) {
+      _roomSent = widget.model.room;
+      unawaited(widget.renderer.setRoom(_roomSent));
       widget.model.requestRender();
     }
     final changed = widget.model.tick(dt);

@@ -24,6 +24,12 @@ class MemoryStore implements KeyValueStore {
 /// The sounds of the game. The real implementation lives in platform/native_services.dart.
 abstract class Sfx {
   void setMuted(bool muted);
+
+  /// Which set of sounds to play ('wood', 'glass', 'soft'); completes when it is ready to play.
+  Future<void> setPack(String pack);
+
+  /// Short vibration with moves, captures and check.
+  void setHaptics(bool on);
   void move();
   void capture();
   void check();
@@ -34,8 +40,14 @@ abstract class Sfx {
 
 class SilentSfx implements Sfx {
   final List<String> played = [];
+  String pack = 'wood';
+  bool haptics = false;
   @override
   void setMuted(bool muted) {}
+  @override
+  Future<void> setPack(String p) async => pack = p;
+  @override
+  void setHaptics(bool on) => haptics = on;
   @override
   void move() => played.add('move');
   @override

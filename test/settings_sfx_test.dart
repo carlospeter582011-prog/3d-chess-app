@@ -18,8 +18,6 @@ void main() {
       expect(s.elo, 1200);
       expect(s.humanColor, HumanColor.white);
       expect(s.mode, GameMode.bot);
-      expect(s.showMoves, isFalse); // move list and captured pieces are off until switched on in Settings
-      expect(s.showCaptured, isFalse);
     });
     test('encode / decode round trip', () {
       const s = Settings(
@@ -30,15 +28,23 @@ void main() {
         elo: 2450,
         humanColor: HumanColor.random,
         mode: GameMode.lan,
-        showMoves: true,
-        showCaptured: true,
         timeMin: 7,
         incSec: 4,
+        playerName: 'Sam',
+        room: Room.night,
+        soundPack: SoundPack.glass,
+        haptics: true,
       );
       expect(Settings.decode(s.encode()), s);
       expect(Settings.decode(s.encode()).timeMin, 7);
+      final d = Settings.decode(s.encode());
+      expect([d.playerName, d.room, d.soundPack, d.haptics], ['Sam', Room.night, SoundPack.glass, true]);
+      expect(Settings.decode('{"playerName":"  A very very long player name indeed  "}').playerName.length, 16);
+      expect(Settings.decode('{"room":"mars","soundPack":5}').room, Room.classic);
+      expect(const Settings().haptics, isFalse); // vibration is optional, off by default
+      expect(const Settings().room, Room.classic);
+      expect(const Settings().soundPack, SoundPack.wood);
       expect(const Settings().timeMin, 0); // the clock is optional and off by default
-      expect(Settings.decode(const Settings().encode()).showMoves, isFalse);
     });
     test('missing, empty or broken data gives defaults', () {
       for (final bad in [null, '', 'garbage', '[]', '42', '{"elo":"x","quality":"ultra","mode":5}']) {
@@ -114,6 +120,15 @@ void main() {
     });
     test('synthesis is deterministic for a given seed', () {
       expect(synthesize('capture', seed: 3), synthesize('capture', seed: 3));
+      for (final pack in soundPacks) {
+        for (final n in soundNames) {
+          final sm = synthesize(n, pack: pack);
+          expect(sm.length, greaterThan(1000), reason: '$pack $n');
+          expect(sm.every((v) => v >= -1 && v <= 1), isTrue, reason: '$pack $n');
+        }
+      }
+      expect(soundPacks.toSet(), {'wood', 'glass', 'soft'});
+      expect(synthesize('move', pack: 'glass'), isNot(synthesize('move', pack: 'wood')));
     });
     test('the capture sound is longer than a plain move; the end sound is the longest', () {
       expect(synthesize('capture').length, greaterThan(synthesize('move').length));

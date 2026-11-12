@@ -66,14 +66,15 @@ void main() {
     tall(t);
     final host = _Host();
     final link = _Link();
-    (RemoteLink, Side, bool, int, int)? started;
+    LanSetup? started;
     await t.pumpWidget(wrap(LanLobby(
       host: true,
-      services: LanServices(makeHost: () => host),
-      onStart: (l, s, h, t, i) => started = (l, s, h, t, i),
+      services: LanServices(makeHost: (_) => host),
+      onStart: (s) => started = s,
       onCancel: () {},
       timeSec: 300,
       incSec: 2,
+      playerName: 'Sam',
     )));
     await t.pump();
     expect(find.byKey(const Key('lan-waiting')), findsOneWidget);
@@ -85,11 +86,16 @@ void main() {
     await t.pump();
     await t.tap(find.byKey(const Key('lan-start')));
     await t.pump();
-    expect(started!.$2, Side.b);
-    expect(started!.$3, isTrue);
-    expect(link.sent.single, {'t': 'start', 'you': 'w', 'time': 300, 'inc': 2}); // the guest gets the other colour and the clock
-    expect(started!.$4, 300);
-    expect(started!.$5, 2);
+    expect(started!.mySide, Side.b);
+    expect(started!.isHost, isTrue);
+    final msg = link.sent.single;
+    expect([msg['t'], msg['you'], msg['time'], msg['inc'], msg['host']], ['start', 'w', 300, 2, 'Sam']); // other colour, clock, host name
+    expect((msg['sid'] as String).isNotEmpty, isTrue);
+    expect(started!.oppName, 'Phone B');
+    expect(started!.myName, 'Sam');
+    expect(started!.reconnect, isA<HostReconnect>());
+    expect(started!.timeSec, 300);
+    expect(started!.incSec, 2);
 
     expect(host.stopped, isTrue);
   });
@@ -98,7 +104,7 @@ void main() {
     tall(t);
     final host = _Host();
     final link = _Link();
-    await t.pumpWidget(wrap(LanLobby(host: true, services: LanServices(makeHost: () => host), onStart: (_, __, ___, ____, _____) {}, onCancel: () {})));
+    await t.pumpWidget(wrap(LanLobby(host: true, services: LanServices(makeHost: (_) => host), onStart: (_) {}, onCancel: () {})));
     await t.pump();
     host.ctl.add(LanGuest(link, 'B'));
     await t.pump();
@@ -113,18 +119,21 @@ void main() {
     final scanner = _Scanner();
     final link = _Link();
     LanAdvert? joined;
-    (RemoteLink, Side, bool, int, int)? started;
+    String? joinedAs;
+    LanSetup? started;
     await t.pumpWidget(wrap(LanLobby(
       host: false,
       services: LanServices(
         makeScanner: () => scanner,
-        join: (ad) async {
+        join: (ad, name) async {
           joined = ad;
+          joinedAs = name;
           return link;
         },
       ),
-      onStart: (l, s, h, t, i) => started = (l, s, h, t, i),
+      onStart: (s) => started = s,
       onCancel: () {},
+      playerName: 'Lee',
     )));
     await t.pump();
     expect(find.byKey(const Key('lan-searching')), findsOneWidget);
@@ -137,13 +146,17 @@ void main() {
     await t.pump();
     await t.pump();
     expect(joined, ad);
+    expect(joinedAs, 'Lee'); // the host sees the guest's name
     expect(find.byKey(const Key('lan-wait-start')), findsOneWidget);
     expect(started, isNull);
-    link.in_.add({'t': 'start', 'you': 'b', 'time': 600, 'inc': 5});
-    expect(started!.$2, Side.b);
-    expect(started!.$4, 600);
-    expect(started!.$5, 5);
-    expect(started!.$3, isFalse);
+    link.in_.add({'t': 'start', 'you': 'b', 'time': 600, 'inc': 5, 'sid': 'abc', 'host': 'Sam'});
+    expect(started!.mySide, Side.b);
+    expect(started!.timeSec, 600);
+    expect(started!.incSec, 5);
+    expect(started!.oppName, 'Sam');
+    expect(started!.myName, 'Lee');
+    expect(started!.reconnect, isA<GuestReconnect>());
+    expect(started!.isHost, isFalse);
   });
 
   testWidgets('join: a refused join shows the reason and lets the player try again', (t) async {
@@ -153,8 +166,8 @@ void main() {
     scanner.list = [ad];
     await t.pumpWidget(wrap(LanLobby(
       host: false,
-      services: LanServices(makeScanner: () => scanner, join: (_) async => throw LanJoinException('That game already has two players.')),
-      onStart: (_, __, ___, ____, _____) {},
+      services: LanServices(makeScanner: () => scanner, join: (_, __) async => throw LanJoinException('That game already has two players.')),
+      onStart: (_) {},
       onCancel: () {},
     )));
     await t.pump();
@@ -168,7 +181,7 @@ void main() {
   testWidgets('cancel calls back', (t) async {
     tall(t);
     var cancelled = 0;
-    await t.pumpWidget(wrap(LanLobby(host: false, services: LanServices(makeScanner: _Scanner.new), onStart: (_, __, ___, ____, _____) {}, onCancel: () => cancelled++, rnd: math.Random(1))));
+    await t.pumpWidget(wrap(LanLobby(host: false, services: LanServices(makeScanner: _Scanner.new), onStart: (_) {}, onCancel: () => cancelled++, rnd: math.Random(1))));
     await t.pump();
     await t.tap(find.byKey(const Key('lan-cancel')));
     expect(cancelled, 1);

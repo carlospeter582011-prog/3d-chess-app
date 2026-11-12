@@ -15,7 +15,11 @@ import '../scene/board_scene.dart';
 import 'settings.dart';
 import 'storage.dart';
 
-const String saveKey = 'chess3d-save-v1';
+const String saveKey = 'chess3d-save-v1'; // old single-slot save, migrated into the slots below
+const String slotsKey = 'chess3d-saves-v2';
+
+/// How many unfinished games are kept; when full, the one played longest ago is replaced.
+const int saveSlots = 3;
 const String settingsKey = 'chess3d-settings-v1';
 
 class Promotion {
@@ -56,6 +60,11 @@ class GameSnapshot {
   /// Chess clock: milliseconds left for each side (only meaningful when `config.timed`).
   final int whiteMs, blackMs;
 
+  /// Two-phone games: the other player's name, a take-back request in either direction, and a short notice.
+  final String opponentName;
+  final bool takebackOut, takebackIn, canTakeback;
+  final String? notice;
+
   const GameSnapshot({
     required this.version,
     required this.active,
@@ -80,6 +89,11 @@ class GameSnapshot {
     this.rematchWaiting = false,
     this.whiteMs = 0,
     this.blackMs = 0,
+    this.opponentName = 'Opponent',
+    this.takebackOut = false,
+    this.takebackIn = false,
+    this.canTakeback = false,
+    this.notice,
   });
 }
 
@@ -87,7 +101,9 @@ class SavedGame {
   final GameConfig config;
   final List<String> moves; // UCI
   final int? whiteMs, blackMs; // clock, when the game was timed
-  const SavedGame(this.config, this.moves, {this.whiteMs, this.blackMs});
+  final String id;
+  final int ts; // when it was last played (ms since epoch)
+  const SavedGame(this.config, this.moves, {this.whiteMs, this.blackMs, this.id = '', this.ts = 0});
 }
 
 class GameController extends ChangeNotifier {
@@ -127,6 +143,7 @@ class GameController extends ChangeNotifier {
   Side? _resigned; // side that resigned
   bool _agreedDraw = false;
   Side? _flagged; // side whose clock ran out
+  String _slotId = '';
   bool _engineError = false;
   bool autoFlip = false;
   bool _disposed = false;
@@ -138,6 +155,12 @@ class GameController extends ChangeNotifier {
   bool _linkLost = false;
   bool _drawIn = false, _drawOut = false;
   bool _rematchMine = false, _rematchTheirs = false;
+  bool _tbOut = false, _tbIn = false; // take-back request sent / received
+  int _tbN = 0; // number of half-moves when the request was made
+  String? _notice;
+  String _myName = 'You', _oppName = 'Opponent';
+  LanReconnect? _reconnect;
+  StreamSubscription<RemoteLink>? _reconnectSub;
   bool get _lan => config.mode == GameMode.lan;
 
   // chess clock
@@ -184,6 +207,11 @@ class GameController extends ChangeNotifier {
       rematchWaiting: _rematchMine && !_rematchTheirs,
       whiteMs: _wMs,
       blackMs: _bMs,
+      opponentName: _oppName,
+      takebackOut: _tbOut,
+      takebackIn: _tbIn,
+      canTakeback: _canTakeback,
+      notice: _notice,
     );
     _shown = _displaySecond();
     notifyListeners();
@@ -208,7 +236,10 @@ class GameController extends ChangeNotifier {
   void applySettings(Settings s) {
     autoFlip = s.autoFlip;
     sfx.setMuted(!s.sound);
+    unawaited(sfx.setPack(s.soundPack.name));
+    sfx.setHaptics(s.haptics);
     board.setLabelsVisible(s.labels);
+    board.setRoom(s.room.name);
   }
 
   // ------------------------------------------------------------------ lifecycle
@@ -220,10 +251,12 @@ class GameController extends ChangeNotifier {
   }
 
   /// Starts a new game, optionally resuming from a list of UCI moves.
-  void start(GameConfig cfg, {List<String> moves = const [], int? whiteMs, int? blackMs}) {
+  void start(GameConfig cfg, {List<String> moves = const [], int? whiteMs, int? blackMs, String? slotId}) {
     _cancelThinking();
     if (cfg.mode != GameMode.lan) _dropLink();
     _drawIn = _drawOut = _rematchMine = _rematchTheirs = false;
+    _tbOut = _tbIn = false;
+    _notice = null;
     config = cfg;
     chess = Chess();
     if (moves.isNotEmpty) {
@@ -233,6 +266,7 @@ class GameController extends ChangeNotifier {
         chess = Chess();
       }
     }
+    _slotId = slotId ?? _now().microsecondsSinceEpoch.toString();
     _resigned = null;
     _flagged = null;
     _agreedDraw = false;
@@ -270,6 +304,8 @@ class GameController extends ChangeNotifier {
       _promotion = null;
       _busy = false;
       _linkLost = false;
+      _tbOut = _tbIn = false;
+      _notice = null;
       _drawIn = _drawOut = _rematchMine = _rematchTheirs = false;
       syncBoard();
     }
@@ -292,28 +328,46 @@ class GameController extends ChangeNotifier {
   void _save() {
     try {
       if (_lan) return; // two-phone games are not saved
-      if (chess.history.isEmpty && !_active) return;
       if (computeStatus().status != GameStatus.playing) {
-        store.remove(saveKey);
+        deleteSlot(store, _slotId); // a finished game is not kept
         return;
       }
+      if (chess.history.isEmpty) return; // nothing to keep yet
       _settleClock();
-      store.set(saveKey, jsonEncode({'config': config.toJson(), 'moves': chess.uciHistory, if (_timed) 'clock': {'w': _wMs, 'b': _bMs}}));
+      final slots = _readSlots(store).where((g) => g.id != _slotId).toList();
+      slots.add(SavedGame(config, chess.uciHistory, whiteMs: _timed ? _wMs : null, blackMs: _timed ? _bMs : null, id: _slotId, ts: _now().millisecondsSinceEpoch));
+      slots.sort((a, b) => b.ts.compareTo(a.ts));
+      _writeSlots(store, slots.take(saveSlots).toList());
     } catch (e) {
       debugPrint('save failed: $e');
     }
   }
 
-  static SavedGame? loadSaved(KeyValueStore store) {
+  static Map<String, Object?> _slotJson(SavedGame g) => {
+        'id': g.id,
+        'ts': g.ts,
+        'config': g.config.toJson(),
+        'moves': g.moves,
+        if (g.whiteMs != null && g.blackMs != null) 'clock': {'w': g.whiteMs, 'b': g.blackMs},
+      };
+
+  static void _writeSlots(KeyValueStore store, List<SavedGame> slots) {
+    store.remove(saveKey); // the old single-slot save has been migrated
+    if (slots.isEmpty) {
+      store.remove(slotsKey);
+    } else {
+      store.set(slotsKey, jsonEncode([for (final g in slots) _slotJson(g)]));
+    }
+  }
+
+  static SavedGame? _parseSlot(Object? j, {String fallbackId = '', int fallbackTs = 0}) {
     try {
-      final text = store.get(saveKey);
-      if (text == null) return null;
-      final j = jsonDecode(text);
       if (j is! Map) return null;
       final cfg = GameConfig.fromJson(j['config']);
       final moves = j['moves'];
       if (cfg == null || moves is! List) return null;
       final list = moves.whereType<String>().toList();
+      if (list.isEmpty) return null;
       // validate: a corrupted save must never crash the app
       Chess.fromUci(list);
       final clock = j['clock'];
@@ -322,13 +376,50 @@ class GameController extends ChangeNotifier {
         w = (clock['w'] as num).round().clamp(1, 1 << 30);
         b = (clock['b'] as num).round().clamp(1, 1 << 30);
       }
-      return SavedGame(cfg, list, whiteMs: w, blackMs: b);
+      final id = j['id'] is String && (j['id'] as String).isNotEmpty ? j['id'] as String : fallbackId;
+      final ts = j['ts'] is num ? (j['ts'] as num).round() : fallbackTs;
+      return SavedGame(cfg, list, whiteMs: w, blackMs: b, id: id, ts: ts);
     } catch (_) {
       return null;
     }
   }
 
-  static void clearSaved(KeyValueStore store) => store.remove(saveKey);
+  static List<SavedGame> _readSlots(KeyValueStore store) {
+    final out = <SavedGame>[];
+    try {
+      final text = store.get(slotsKey);
+      if (text != null) {
+        final j = jsonDecode(text);
+        if (j is List) {
+          for (final e in j) {
+            final g = _parseSlot(e);
+            if (g != null && g.id.isNotEmpty) out.add(g);
+          }
+        }
+      } else {
+        // the old single save becomes the first slot
+        final old = store.get(saveKey);
+        if (old != null) {
+          final g = _parseSlot(jsonDecode(old), fallbackId: 'migrated', fallbackTs: 1);
+          if (g != null) out.add(g);
+        }
+      }
+    } catch (_) {}
+    out.sort((a, b) => b.ts.compareTo(a.ts));
+    return out.take(saveSlots).toList();
+  }
+
+  /// The unfinished games kept on this phone, most recently played first (at most [saveSlots]).
+  static List<SavedGame> loadSlots(KeyValueStore store) => _readSlots(store);
+
+  static void deleteSlot(KeyValueStore store, String id) {
+    final all = _readSlots(store);
+    final rest = all.where((g) => g.id != id).toList();
+    if (rest.length != all.length || store.get(saveKey) != null) {
+      _writeSlots(store, rest);
+      store.remove(saveKey); // the migrated old save is gone for good
+    }
+  }
 
   void _cancelThinking() {
     _epoch++;
@@ -348,6 +439,7 @@ class GameController extends ChangeNotifier {
   /// A tap on the board. [sq] is the piece or square under the finger, [ground] the floor square under it.
   void tap(String sq, [String? ground]) {
     if (!_active || _busy || _promotion != null) return;
+    if (_lan && (_tbOut || _tbIn)) return; // wait for the answer to the take-back request
     if (computeStatus().status != GameStatus.playing || !_isHumanTurn()) return;
     // A tall piece can hide the square behind it. If a piece is selected and the tap landed on a piece that
     // is not a legal destination (e.g. the selected piece itself) while the floor under the finger IS one, move there.
@@ -451,6 +543,7 @@ class GameController extends ChangeNotifier {
       }
       _clockAt = _now();
     }
+    _notice = null;
     if (_lan && !fromRemote) _link?.send({'t': 'move', 'uci': mv.uci});
     _drawIn = _drawOut = false; // a pending draw offer lapses once a move is played
     board.setMarkers(MarkerSet(last: (mv.fromName, mv.toName)));
@@ -560,6 +653,7 @@ class GameController extends ChangeNotifier {
     if (computeStatus().status != GameStatus.playing) return;
     _cancelThinking();
     _resigned = config.mode == GameMode.local ? chess.turn : config.humanColor;
+    _tbOut = _tbIn = false;
     if (_lan) _link?.send({'t': 'resign'});
     _selected = null;
     _promotion = null;
@@ -581,6 +675,7 @@ class GameController extends ChangeNotifier {
     _cancelThinking();
     _agreedDraw = true;
     _drawIn = _drawOut = false;
+    _tbOut = _tbIn = false;
     _selected = null;
     board.unlift();
     _updateMarkers();
@@ -591,16 +686,49 @@ class GameController extends ChangeNotifier {
 
   // ------------------------------------------------------------------ two-phone games
   /// Starts a two-phone game on an open connection. [mySide] is this phone's colour; the host decides the colours.
-  void startLan(RemoteLink link, Side mySide, {required bool isHost, int timeSec = 0, int incSec = 0}) {
+  void startLan(
+    RemoteLink link,
+    Side mySide, {
+    required bool isHost,
+    int timeSec = 0,
+    int incSec = 0,
+    String myName = 'You',
+    String oppName = 'Opponent',
+    LanReconnect? reconnect,
+  }) {
     _dropLink();
-    _link = link;
     _isHost = isHost;
+    _myName = myName;
+    _oppName = oppName;
+    _attach(link);
+    _reconnect = reconnect;
+    _reconnectSub = reconnect?.links.listen(_adopt);
+    start(GameConfig(mode: GameMode.lan, humanColor: mySide, timeSec: timeSec, incSec: incSec));
+  }
+
+  void _attach(RemoteLink link) {
+    unawaited(_linkSub?.cancel());
+    _link = link;
     _linkLost = false;
     _linkSub = link.messages.listen(_onRemote);
     unawaited(link.done.then((_) {
       if (identical(_link, link)) _onLinkLost();
     }));
-    start(GameConfig(mode: GameMode.lan, humanColor: mySide, timeSec: timeSec, incSec: incSec));
+  }
+
+  /// The connection came back (the guest rejoined): carry on, and compare move lists in case a move was lost on the way.
+  void _adopt(RemoteLink link) {
+    if (_disposed || !_lan) {
+      unawaited(link.close());
+      return;
+    }
+    final old = _link;
+    if (old != null && !identical(old, link)) unawaited(old.close());
+    _settleClock();
+    _attach(link);
+    _clockAt = _now();
+    link.send({'t': 'sync', 'moves': chess.uciHistory});
+    _refresh();
   }
 
   void _dropLink() {
@@ -608,15 +736,24 @@ class GameController extends ChangeNotifier {
     _link = null;
     unawaited(_linkSub?.cancel());
     _linkSub = null;
+    unawaited(_reconnectSub?.cancel());
+    _reconnectSub = null;
+    final r = _reconnect;
+    _reconnect = null;
+    if (r != null) unawaited(r.stop());
     if (l != null) unawaited(l.close());
   }
 
   void _onLinkLost() {
     if (_disposed) return;
+    _settleClock();
     _link = null;
     _linkLost = true;
     _drawIn = _drawOut = false;
+    _tbOut = _tbIn = false;
     _refresh();
+    // while the game is still on, try to get the connection back (the host just keeps listening)
+    if (computeStatus().status == GameStatus.playing) unawaited(_reconnect?.start());
   }
 
   void _onRemote(Map<String, dynamic> m) {
@@ -642,6 +779,16 @@ class GameController extends ChangeNotifier {
             _drawOut = false;
             _refresh();
         }
+      case 'sync':
+        final theirs = m['moves'];
+        if (theirs is! List || computeStatus().status != GameStatus.playing) return;
+        final mine = chess.uciHistory;
+        final list = theirs.whereType<String>().toList();
+        if (list.length > mine.length && [for (var i = 0; i < mine.length; i++) list[i] == mine[i]].every((e) => e)) {
+          unawaited(_playRemoteMoves(list.sublist(mine.length)));
+        }
+      case 'tb':
+        _onTakeback(m);
       case 'timeout':
         if (!_timed || computeStatus().status != GameStatus.playing) return;
         _flagged = config.humanColor.other;
@@ -662,6 +809,88 @@ class GameController extends ChangeNotifier {
           ));
         }
     }
+  }
+
+  Future<void> _playRemoteMoves(List<String> moves) async {
+    for (final u in moves) {
+      await _playRemoteMove(u);
+    }
+  }
+
+  // ---- take-back requests (two-phone games)
+  bool get _canTakeback {
+    if (!_lan || _linkLost || _tbOut || _tbIn || _drawOut || _drawIn || _busy) return false;
+    if (computeStatus().status != GameStatus.playing) return false;
+    final n = chess.history.length;
+    if (n == 0) return false;
+    final lastMover = n.isOdd ? Side.w : Side.b;
+    return lastMover == config.humanColor || n >= 2; // takes back my last move (and the reply, if there was one)
+  }
+
+  void requestTakeback() {
+    if (!_canTakeback) return;
+    _tbOut = true;
+    _tbN = chess.history.length;
+    _notice = null;
+    _link?.send({'t': 'tb', 'a': 'req', 'n': _tbN});
+    _refresh();
+  }
+
+  void answerTakeback(bool accept) {
+    if (!_lan || !_tbIn) return;
+    _tbIn = false;
+    final n = _tbN;
+    final ok = accept && computeStatus().status == GameStatus.playing && n == chess.history.length;
+    _link?.send({'t': 'tb', 'a': ok ? 'yes' : 'no', 'n': n});
+    if (ok) {
+      _applyTakeback(config.humanColor.other, n);
+    } else {
+      _refresh();
+    }
+  }
+
+  void _onTakeback(Map<String, dynamic> m) {
+    final n = m['n'];
+    switch (m['a']) {
+      case 'req':
+        if (n is! int || n < 1 || _tbOut || computeStatus().status != GameStatus.playing || n != chess.history.length) {
+          _link?.send({'t': 'tb', 'a': 'no', 'n': n});
+          return;
+        }
+        _tbIn = true;
+        _tbN = n;
+        _refresh();
+      case 'yes':
+        if (!_tbOut) return;
+        _tbOut = false;
+        if (n != _tbN || n != chess.history.length) {
+          _refresh();
+          return;
+        }
+        _applyTakeback(config.humanColor, n);
+      case 'no':
+        if (!_tbOut) return;
+        _tbOut = false;
+        _notice = 'Take-back declined';
+        _refresh();
+    }
+  }
+
+  /// Both phones undo the same half-moves: the requester's last move (and the opponent's reply, if it has been made).
+  void _applyTakeback(Side requester, int n) {
+    _cancelThinking();
+    _settleClock();
+    final lastMover = n.isOdd ? Side.w : Side.b;
+    final plies = lastMover == requester ? 1 : 2;
+    for (var i = 0; i < plies && chess.history.isNotEmpty; i++) {
+      chess.undo();
+    }
+    _selected = null;
+    _promotion = null;
+    _notice = null;
+    board.unlift();
+    syncBoard();
+    _refresh();
   }
 
   /// The other player's move. Only a legal move for the side to move is ever played.
@@ -685,6 +914,7 @@ class GameController extends ChangeNotifier {
     _selected = null;
     _promotion = null;
     _drawIn = _drawOut = false;
+    _tbOut = _tbIn = false;
     board.unlift();
     _updateMarkers();
     _refresh();
