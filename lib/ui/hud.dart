@@ -1,5 +1,5 @@
-// In-game HUD: menu and settings buttons, status line, player cards (with clocks) and control buttons.
-// Narrow screens: overlays above / below the board. Wide screens: a side panel.
+// In-game HUD: one slim row of buttons along the bottom (menu, settings and the game controls). A small chip row
+// at the top shows the clocks and anything that needs attention (check, lost connection, requests). Nothing else.
 
 import 'package:flutter/material.dart';
 
@@ -34,47 +34,6 @@ import 'theme.dart';
   if (bot) return (text: s.turn == human ? 'Your move' : '…', tone: '');
   if (lan) return (text: s.turn == human ? 'Your move' : '${s.opponentName} is thinking…', tone: '');
   return (text: '${s.turn.label} to move', tone: '');
-}
-
-class _PlayerCard extends StatelessWidget {
-  const _PlayerCard({required this.s, required this.side, required this.label, this.sub, this.compact = false});
-  final GameSnapshot s;
-  final Side side;
-  final String label;
-  final String? sub;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final active = s.status == GameStatus.playing && s.turn == side;
-    return Container(
-      constraints: BoxConstraints(minHeight: compact ? 36 : 46),
-      padding: EdgeInsets.symmetric(horizontal: 12, vertical: compact ? 4 : 8),
-      decoration: BoxDecoration(
-        color: C.panel,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: active ? C.gold : C.line, width: active ? 1.5 : 1),
-      ),
-      child: Row(children: [
-        Container(
-          width: 14,
-          height: 14,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: side == Side.w ? const Color(0xFFF1DFB8) : const Color(0xFF2A1B12),
-            border: Border.all(color: const Color(0x66FFFFFF)),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-          Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
-          if (sub != null) Text(sub!, style: const TextStyle(color: C.muted, fontSize: 12)),
-        ]),
-        const Spacer(),
-        if (s.config.timed) _Clock(ms: side == Side.w ? s.whiteMs : s.blackMs, running: active && s.history.isNotEmpty, side: side),
-      ]),
-    );
-  }
 }
 
 /// "m:ss" (or "h:mm:ss"), rounding up so the clock never shows 0:00 before it has really run out.
@@ -232,130 +191,107 @@ class _HudState extends State<Hud> {
     final lan = s.config.mode == GameMode.lan;
     final mine = bot || lan; // one human side on this phone
     final human = s.config.humanColor;
-    final opp = mine ? human.other : Side.b;
-    final me = mine ? human : Side.w;
     final st = statusText(s);
     final over = s.status != GameStatus.playing;
-    // Phone held sideways: the side panel is short, so tighten everything instead of overflowing.
-    final compact = widget.wide && MediaQuery.sizeOf(context).height < 470;
-    final gap = compact ? 5.0 : 8.0;
 
-    final statusBox = Expanded(
-      child: Container(
-        key: const Key('status'),
-        padding: EdgeInsets.symmetric(horizontal: 12, vertical: compact ? 8 : 11),
-        decoration: BoxDecoration(
-          color: switch (st.tone) { 'check' => const Color(0xE6A0281C), _ => C.panel },
-          gradient: st.tone == 'over' ? const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [C.gold2, C.gold]) : null,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: st.tone == 'check' ? const Color(0x80FF7864) : (st.tone == 'over' ? Colors.transparent : C.line)),
-        ),
-        child: Text(
-          st.text,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            fontSize: 15,
-            color: switch (st.tone) { 'check' => Colors.white, 'over' => C.onGold, 'think' => C.gold2, _ => C.text },
+    // Small chips: clocks (when timed) and a status only when there is something to say.
+    final showStatus = lan || st.tone != '';
+    final chips = <Widget>[
+      if (s.config.timed) _Clock(ms: s.whiteMs, running: s.status == GameStatus.playing && s.turn == Side.w && s.history.isNotEmpty, side: Side.w),
+      if (showStatus)
+        Flexible(
+          child: Container(
+            key: const Key('status'),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: switch (st.tone) { 'check' => const Color(0xE6A0281C), _ => C.panel },
+              gradient: st.tone == 'over' ? const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [C.gold2, C.gold]) : null,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: st.tone == 'check' ? const Color(0x80FF7864) : (st.tone == 'over' ? Colors.transparent : C.line)),
+            ),
+            child: Text(
+              st.text,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+                color: switch (st.tone) { 'check' => Colors.white, 'over' => C.onGold, 'think' => C.gold2, _ => C.text },
+              ),
+            ),
           ),
         ),
+      if (s.config.timed) _Clock(ms: s.blackMs, running: s.status == GameStatus.playing && s.turn == Side.b && s.history.isNotEmpty, side: Side.b),
+    ];
+    final info = chips.isEmpty
+        ? const SizedBox.shrink()
+        : Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              for (var i = 0; i < chips.length; i++) ...[if (i > 0) const SizedBox(width: 6), chips[i]],
+            ]),
+          );
+
+    final buttons = <Widget>[
+      _CtrlButton(compact: true, key: const Key('btn-menu'), icon: '☰', label: 'Menu', onPressed: widget.onMenu),
+      _CtrlButton(compact: true, key: const Key('btn-settings'), icon: '⚙', label: 'Settings', onPressed: widget.onSettings),
+      if (lan)
+        _CtrlButton(compact: true, key: const Key('btn-undo'), icon: '↶', label: 'Take back', onPressed: s.canTakeback ? widget.game.requestTakeback : null)
+      else
+        _CtrlButton(compact: true, key: const Key('btn-undo'), icon: '↶', label: 'Undo', onPressed: s.canUndo ? widget.game.undo : null),
+      _CtrlButton(compact: true, key: const Key('btn-flip'), icon: '⟳', label: 'Flip', onPressed: widget.board.flipView),
+      _CtrlButton(
+        compact: true,
+        key: const Key('btn-top'),
+        icon: '⬒',
+        label: 'Top',
+        on: topView,
+        onPressed: () {
+          final next = !topView;
+          setState(() => topView = next);
+          widget.board.resetCamera(animate: true, side: widget.board.viewSide(), top: next);
+        },
       ),
+      _CtrlButton(
+        compact: true,
+        key: const Key('btn-reset'),
+        icon: '◎',
+        label: 'Reset',
+        onPressed: () {
+          setState(() => topView = false);
+          widget.board.resetCamera(animate: true, side: mine ? human : widget.board.viewSide());
+        },
+      ),
+      if (over)
+        _CtrlButton(
+          compact: true,
+          key: const Key('btn-rematch'),
+          icon: '♻',
+          label: s.rematchWaiting ? 'Waiting…' : 'Rematch',
+          onPressed: (s.rematchWaiting || (lan && s.linkLost)) ? null : () => _confirm(ConfirmKind.rematch),
+        )
+      else if (bot)
+        _CtrlButton(compact: true, key: const Key('btn-resign'), icon: '⚑', label: 'Resign', onPressed: () => _confirm(ConfirmKind.resign))
+      else ...[
+        _CtrlButton(compact: true, key: const Key('btn-draw'), icon: '½', label: 'Draw', onPressed: () => _confirm(ConfirmKind.draw)),
+        _CtrlButton(compact: true, key: const Key('btn-resign'), icon: '⚑', label: 'Resign', onPressed: () => _confirm(ConfirmKind.resign)),
+      ],
+    ];
+
+    final bar = Container(
+      decoration: widget.wide
+          ? const BoxDecoration(color: Color(0xFF17110D), border: Border(top: BorderSide(color: C.line)))
+          : null,
+      padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
+      child: Row(children: [for (final w in buttons) Expanded(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 2), child: w))]),
     );
 
-    final top = Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Row(children: [
-        GlassIconButton(icon: '☰', tooltip: 'Menu', onPressed: widget.onMenu),
-        const SizedBox(width: 8),
-        statusBox,
-        const SizedBox(width: 8),
-        GlassIconButton(icon: '⚙', tooltip: 'Settings', onPressed: widget.onSettings),
-      ]),
-      SizedBox(height: gap),
-      _PlayerCard(
-        s: s,
-        side: opp,
-        label: bot ? 'Bot · ${s.config.elo}' : (lan ? s.opponentName : opp.label),
-        sub: mine ? opp.label : null,
-        compact: compact,
-      ),
+    // The empty middle lets touches reach the board.
+    return Column(children: [
+      SafeArea(bottom: false, child: info),
+      const Spacer(),
+      SafeArea(top: false, child: bar),
     ]);
-
-    final controls = Row(children: [
-      for (final w in <Widget>[
-        if (lan)
-          _CtrlButton(compact: compact, key: const Key('btn-undo'), icon: '↶', label: 'Take back', onPressed: s.canTakeback ? widget.game.requestTakeback : null)
-        else
-          _CtrlButton(compact: compact, key: const Key('btn-undo'), icon: '↶', label: 'Undo', onPressed: s.canUndo ? widget.game.undo : null),
-        _CtrlButton(compact: compact, key: const Key('btn-flip'), icon: '⟳', label: 'Flip', onPressed: widget.board.flipView),
-        _CtrlButton(
-          compact: compact,
-          key: const Key('btn-top'),
-          icon: '⬒',
-          label: 'Top',
-          on: topView,
-          onPressed: () {
-            final next = !topView;
-            setState(() => topView = next);
-            widget.board.resetCamera(animate: true, side: widget.board.viewSide(), top: next);
-          },
-        ),
-        _CtrlButton(
-          compact: compact,
-          key: const Key('btn-reset'),
-          icon: '◎',
-          label: 'Reset',
-          onPressed: () {
-            setState(() => topView = false);
-            widget.board.resetCamera(animate: true, side: mine ? human : widget.board.viewSide());
-          },
-        ),
-        if (over)
-          _CtrlButton(
-            compact: compact,
-            key: const Key('btn-rematch'),
-            icon: '♻',
-            label: s.rematchWaiting ? 'Waiting…' : 'Rematch',
-            onPressed: (s.rematchWaiting || (lan && s.linkLost)) ? null : () => _confirm(ConfirmKind.rematch),
-          )
-        else if (bot)
-          _CtrlButton(compact: compact, key: const Key('btn-resign'), icon: '⚑', label: 'Resign', onPressed: () => _confirm(ConfirmKind.resign))
-        else ...[
-          _CtrlButton(compact: compact, key: const Key('btn-draw'), icon: '½', label: 'Draw', onPressed: () => _confirm(ConfirmKind.draw)),
-          _CtrlButton(compact: compact, key: const Key('btn-resign'), icon: '⚑', label: 'Resign', onPressed: () => _confirm(ConfirmKind.resign)),
-        ],
-      ])
-        Expanded(child: Padding(padding: EdgeInsets.symmetric(horizontal: compact ? 2 : 3), child: w)),
-    ]);
-
-    final bottom = Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      _PlayerCard(s: s, side: me, label: mine ? 'You' : me.label, sub: mine ? me.label : null, compact: compact),
-      SizedBox(height: gap),
-      controls,
-    ]);
-
-    if (widget.wide) {
-      return Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF1C1510), Color(0xFF120D09)]),
-          border: Border(left: BorderSide(color: C.line)),
-        ),
-        padding: EdgeInsets.all(compact ? 8 : 16),
-        child: SafeArea(
-          child: Column(children: [
-            Expanded(child: top),
-            SizedBox(height: compact ? 6 : 12),
-            bottom,
-          ]),
-        ),
-      );
-    }
-
-    // narrow: overlays; the gap in the middle lets touches reach the board
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-        child: Column(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [top, bottom]),
-      ),
-    );
   }
 }

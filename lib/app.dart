@@ -235,16 +235,15 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
     return Scaffold(
       backgroundColor: C.bg,
       body: LayoutBuilder(builder: (context, c) {
-        // Any landscape screen (phones included) gets the side panel, so the HUD never covers the board.
         final wide = c.maxWidth / c.maxHeight >= 1.25;
-        final panelWidth = (c.maxWidth * 0.36).clamp(250.0, 340.0);
-        final panel = (active && wide && ready) ? panelWidth : 0.0;
+        // Landscape: the button row is a bar under the board, so it never covers it.
+        final barH = (active && wide && ready) ? 58.0 + MediaQuery.paddingOf(context).bottom : 0.0;
         return Stack(children: [
           Positioned(
             left: 0,
             top: 0,
-            bottom: 0,
-            right: panel,
+            bottom: barH,
+            right: 0,
             child: SceneView(
               key: ValueKey('scene-$attempt'),
               model: d.model,
@@ -285,17 +284,9 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
               ),
             ),
           if (ready && active)
-            wide
-                ? Positioned(
-                    right: 0,
-                    top: 0,
-                    bottom: 0,
-                    width: panelWidth,
-                    child: Hud(game: game, snapshot: snap, board: d.model, onMenu: game.leave, onSettings: _openSettings, wide: true),
-                  )
-                : Positioned.fill(
-                    child: Hud(game: game, snapshot: snap, board: d.model, onMenu: game.leave, onSettings: _openSettings),
-                  ),
+            Positioned.fill(
+              child: Hud(game: game, snapshot: snap, board: d.model, onMenu: game.leave, onSettings: _openSettings, wide: wide),
+            ),
           if (ready && active && snap.promotion != null)
             Positioned.fill(
               child: PromotionDialog(side: snap.turn, onChoose: game.choosePromotion, onCancel: game.cancelPromotion),
