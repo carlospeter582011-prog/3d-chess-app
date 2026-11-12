@@ -1,0 +1,19 @@
+{
+  "_comment": "Legal's mate (Legal vs Saint Brie, 1750). 13 plies, no castling / en passant / promotion. start/dur are frames at 30 fps on the film timeline (0 = first frame of the video). Validated by scripts/validate-chess.mjs.",
+  "plies": [
+    { "san": "e4",   "start": 96,  "dur": 12 },
+    { "san": "e5",   "start": 110, "dur": 12 },
+    { "san": "Nf3",  "start": 124, "dur": 14 },
+    { "san": "d6",   "start": 140, "dur": 12 },
+    { "san": "Bc4",  "start": 154, "dur": 15 },
+    { "san": "Bg4",  "start": 170, "dur": 16 },
+    { "san": "Nc3",  "start": 190, "dur": 17 },
+    { "san": "g6",   "start": 209, "dur": 12 },
+    { "san": "Nxe5", "start": 226, "dur": 18 },
+    { "san": "Bxd1", "start": 248, "dur": 20 },
+    { "san": "Bxf7+","start": 276, "dur": 22 },
+    { "san": "Ke7",  "start": 310, "dur": 18, "slow": true },
+    { "san": "Nd5#", "start": 374, "dur": 70, "slow": true, "final": true }
+  ],
+  "phonePlies": ["e4", "e5", "Nf3", "d6", "Bc4", "Bg4", "Nc3", "g6"]
+}

@@ -1,17 +1,21 @@
 {
   "name": "chess3d-ad-video",
   "private": true,
-  "version": "1.0.0",
-  "description": "Remotion project that renders the 3D Chess promo video (vertical + landscape). Edit src/, then npm run render.",
+  "version": "2.0.0",
+  "description": "Remotion project that renders THE FINAL MOVE, the 3D Chess cinematic promo (vertical + landscape). Edit src/, then npm run render.",
   "scripts": {
     "prepare-assets": "node scripts/prepare-assets.mjs",
+    "check": "tsc --noEmit && node scripts/validate-chess.mjs && node scripts/check-no-thirdparty-audio.mjs",
     "studio": "npm run prepare-assets && remotion studio src/index.ts",
-    "still": "npm run prepare-assets && remotion still src/index.ts AdVertical out/still.png --frame=150",
+    "still": "npm run prepare-assets && remotion still src/index.ts AdLandscape out/still.png --frame=447",
     "render": "npm run prepare-assets && npm run render:vertical && npm run render:landscape",
-    "render:vertical": "remotion render src/index.ts AdVertical out/chess3d-ad-vertical.mp4",
-    "render:landscape": "remotion render src/index.ts AdLandscape out/chess3d-ad-landscape.mp4"
+    "render:vertical": "remotion render src/index.ts AdVertical out/3d-chess-cinematic-v2-vertical.mp4 --codec=h264 --pixel-format=yuv420p --crf=18 --audio-codec=aac --audio-bitrate=192k --timeout=180000",
+    "render:landscape": "remotion render src/index.ts AdLandscape out/3d-chess-cinematic-v2-landscape.mp4 --codec=h264 --pixel-format=yuv420p --crf=18 --audio-codec=aac --audio-bitrate=192k --timeout=180000",
+    "validate": "node scripts/validate-video.mjs vertical out/3d-chess-cinematic-v2-vertical.mp4 && node scripts/validate-video.mjs landscape out/3d-chess-cinematic-v2-landscape.mp4"
   },
   "dependencies": {
+    "@fontsource/cinzel": "5.2.5",
+    "@fontsource/inter": "5.2.5",
     "@react-three/fiber": "8.17.10",
     "@remotion/cli": "4.0.542",
     "@remotion/three": "4.0.542",

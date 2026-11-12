@@ -1,14 +1,30 @@
-# Renders the promo video (ad-video/, Remotion) in both formats and attaches the MP4s to a pre-release.
-# Run it from the Actions tab ("Render ad video") after editing ad-video/src.
+# Renders THE FINAL MOVE (ad-video/, Remotion + three.js) in vertical 1080x1920 and landscape 1920x1080,
+# validates both MP4s, uploads them (plus QA frames) as an Actions artifact and publishes them to the
+# "ad-video-v2" pre-release. Run it from the Actions tab: "Render ad video" -> Run workflow.
+# This workflow never touches the Android build (android-apk.yml) or any app release.
 name: Render ad video
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the videos to the ad-video-v2 pre-release
+        type: boolean
+        default: true
+
+concurrency:
+  group: render-ad-video
+  cancel-in-progress: false
+
+env:
+  TAG: ad-video-v2
+  V_FILE: 3d-chess-cinematic-v2-vertical.mp4
+  L_FILE: 3d-chess-cinematic-v2-landscape.mp4
 
 jobs:
   render:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
     permissions:
       contents: write
     defaults:
@@ -23,21 +39,60 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: ad-video/package-lock.json
-      - run: npm ci --no-audit --no-fund
-      - run: npx tsc --noEmit
-      - run: npm run prepare-assets
-      - name: Render landscape (16:9)
-        run: npx remotion render src/index.ts AdLandscape out/chess3d-ad-landscape.mp4 --concurrency=$(nproc) --timeout=180000
-      - name: Render vertical (9:16)
-        run: npx remotion render src/index.ts AdVertical out/chess3d-ad-vertical.mp4 --concurrency=$(nproc) --timeout=180000
-      - uses: actions/upload-artifact@v4
+      - name: Install FFmpeg and Chrome checks
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version | head -1
+          "$CHROME_BIN" --version
+      - name: Install dependencies (reproducible)
+        run: npm ci --no-audit --no-fund
+      - name: Code checks (types, chess legality and checkmate, audio provenance)
+        run: |
+          npx tsc --noEmit
+          node scripts/validate-chess.mjs
+      - name: Prepare assets (original GLB models, icon, fonts, synthesised audio)
+        run: |
+          npm run prepare-assets
+          node scripts/check-no-thirdparty-audio.mjs
+      - name: Smoke test one frame of each format
+        run: |
+          npx remotion still src/index.ts AdLandscape out/smoke-l.png --frame=447 --timeout=240000
+          npx remotion still src/index.ts AdVertical out/smoke-v.png --frame=447 --timeout=240000
+      - name: Render vertical (9:16, 1080x1920)
+        run: npx remotion render src/index.ts AdVertical "out/$V_FILE" --codec=h264 --pixel-format=yuv420p --crf=18 --audio-codec=aac --audio-bitrate=192k --concurrency=$(nproc) --timeout=240000
+      - name: Render landscape (16:9, 1920x1080)
+        run: npx remotion render src/index.ts AdLandscape "out/$L_FILE" --codec=h264 --pixel-format=yuv420p --crf=18 --audio-codec=aac --audio-bitrate=192k --concurrency=$(nproc) --timeout=240000
+      - name: Validate both videos and extract QA frames
+        run: |
+          node scripts/validate-video.mjs vertical "out/$V_FILE" out/qa-frames
+          node scripts/validate-video.mjs landscape "out/$L_FILE" out/qa-frames
+      - name: Build QA contact sheets
+        if: always()
+        run: |
+          for k in vertical landscape; do
+            ffmpeg -y -hide_banner -loglevel error -pattern_type glob -i "out/qa-frames/$k-*.png" \
+              -vf "scale=$([ $k = vertical ] && echo 216:384 || echo 384:216),tile=10x2" -frames:v 1 "out/qa-frames/contact-sheet-$k.png" || true
+          done
+      - name: Upload videos and QA frames
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: chess3d-ad
-          path: ad-video/out/*.mp4
-      - name: Publish to a release
+          name: 3d-chess-cinematic-v2
+          path: |
+            ad-video/out/*.mp4
+            ad-video/out/qa-frames/*.png
+          if-no-files-found: warn
+      - name: Publish to the ad-video-v2 pre-release
+        if: inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "ad-video-${{ github.run_number }}" out/chess3d-ad-landscape.mp4 out/chess3d-ad-vertical.mp4 \
-            --title "3D Chess promo video #${{ github.run_number }}" --prerelease --target "${{ github.sha }}" \
-            --notes "Rendered from ad-video/ by the Render ad video workflow. Source: commit ${{ github.sha }}."
+          NOTES="THE FINAL MOVE: 3D Chess cinematic advertisement v2 (27 s, 30 fps, H.264 + AAC). Rendered from ad-video/ at commit ${GITHUB_SHA} by workflow run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}. All audio is original (synthesised); see ad-video/README.md."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists: replacing only its two video assets (no other release is touched)."
+            gh release upload "$TAG" "out/$V_FILE" "out/$L_FILE" --clobber
+            gh release edit "$TAG" --prerelease --notes "$NOTES"
+          else
+            gh release create "$TAG" "out/$V_FILE" "out/$L_FILE" --title "3D Chess cinematic ad v2: THE FINAL MOVE" --prerelease --target "$GITHUB_SHA" --notes "$NOTES"
+          fi
+          gh release view "$TAG" --json url,assets --jq '.url, (.assets[] | .name + " " + (.size|tostring))'
