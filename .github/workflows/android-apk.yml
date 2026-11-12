@@ -88,7 +88,8 @@ jobs:
           set -euo pipefail
           tools="$ANDROID_HOME/build-tools/37.0.0"
           badging=$("$tools/aapt2" dump badging dist/chess3d-release.apk)
-          grep -Fx "sdkVersion:'23'" <<< "$badging"
+          grep -E '^(package:|minSdkVersion:|targetSdkVersion:)' <<< "$badging"
+          grep -Fx "minSdkVersion:'24'" <<< "$badging"
           grep -Fx "targetSdkVersion:'37'" <<< "$badging"
           "$tools/zipalign" -c -P 16 4 dist/chess3d-release.apk
           native_dir=$(mktemp -d)
@@ -140,4 +141,4 @@ jobs:
             --title "3D Chess Android $TAG" \
             --target "${{ github.sha }}" \
             --latest \
-            --notes "Commit ${{ github.sha }}. $SIGN AdMob TEST IDs only. Android 6.0+ (API 23), arm64-v8a, OpenGL ES 3.0. Analyze and unit/widget tests passed in CI; not yet verified on a physical device."
+            --notes "Commit ${{ github.sha }}. $SIGN AdMob TEST IDs only. Android 7.0+ (API 24), targets Android 17 (API 37), arm64-v8a, OpenGL ES 3.0. Analyze and unit/widget tests passed in CI; not yet verified on a physical device."

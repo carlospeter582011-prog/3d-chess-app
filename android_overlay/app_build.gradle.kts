@@ -19,7 +19,7 @@ android {
 
     defaultConfig {
         applicationId = "__PKG__"
-        minSdk = 23          // Android 6.0; device must support OpenGL ES 3.0 and arm64
+        minSdk = 24          // Minimum supported by Flutter 3.50 and the Mobile Ads plugin
         targetSdk = 37
         versionCode = flutter.versionCode
         versionName = flutter.versionName
