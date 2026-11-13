@@ -37,10 +37,11 @@ if (a) {
   const max = parseFloat(/max_volume: (-?[\d.]+) dB/.exec(vol)?.[1] ?? '-99');
   check(mean > -32 && max > -12, `audio is audible, not silent (mean ${mean} dB, peak ${max} dB)`);
   check(max < -0.1, `audio does not clip (peak ${max} dB)`);
-  // the checkmate impact (frame 444 = 14.8 s) must be clearly louder than the quiet tension just before it
-  const seg = (ss, t) => parseFloat(/max_volume: (-?[\d.]+) dB/.exec(run('ffmpeg', ['-hide_banner', '-nostats', '-ss', String(ss), '-t', String(t), '-i', file, '-vn', '-af', 'volumedetect', '-f', 'null', '-']))?.[1] ?? '-99');
-  const before = seg(13.6, 1.0), impact = seg(14.78, 0.5);
-  check(impact > before + 3, `checkmate impact stands out (${impact} dB vs ${before} dB just before)`);
+  // the checkmate impact (frame 444 = 14.8 s) must be clearly louder, on average, than the tension just before it
+  // (window ends before the winning piece's landing knock at ~14.57 s)
+  const seg = (ss, t) => parseFloat(/mean_volume: (-?[\d.]+) dB/.exec(run('ffmpeg', ['-hide_banner', '-nostats', '-ss', String(ss), '-t', String(t), '-i', file, '-vn', '-af', 'volumedetect', '-f', 'null', '-']))?.[1] ?? '-99');
+  const before = seg(13.4, 1.0), impact = seg(14.8, 0.6);
+  check(impact > before + 3, `checkmate impact stands out (mean ${impact} dB in the 0.6 s after vs ${before} dB just before)`);
 }
 
 // black / blank frames anywhere in the film
