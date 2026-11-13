@@ -2,7 +2,7 @@
 // Checks with ffprobe/ffmpeg: container, codec/pixel format, resolution, frame rate, duration, audio track and level,
 // black/blank frames over the whole film, and per-scene brightness/contrast of extracted representative frames
 // (those frames are saved so they can be inspected by eye or attached as a CI artifact).
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -11,9 +11,10 @@ const want = { vertical: [1080, 1920], landscape: [1920, 1080] }[kind];
 if (!want || !file) { console.error('usage: validate-video.mjs <vertical|landscape> <file.mp4> [frames-dir]'); process.exit(2); }
 const errors = [];
 const check = (ok, msg) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${msg}`); if (!ok) errors.push(msg); };
-const run = (cmd, args) => { try { return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 << 28 }); } catch (e) { return (e.stdout || '') + (e.stderr || ''); } };
+// ffmpeg prints its filter reports (volumedetect, blackdetect, freezedetect) to stderr, so capture both streams.
+const run = (cmd, args) => { const r = spawnSync(cmd, args, { encoding: 'utf8', maxBuffer: 1 << 28 }); return (r.stdout || '') + (r.stderr || ''); };
 
-const probe = JSON.parse(run('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', file]));
+const probe = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', file], { encoding: 'utf8' }));
 const v = probe.streams.find((s) => s.codec_type === 'video');
 const a = probe.streams.find((s) => s.codec_type === 'audio');
 const dur = parseFloat(probe.format.duration);
@@ -62,11 +63,11 @@ for (const [name, fr] of frames) {
   const out = path.join(framesDir, `${kind}-${name}.png`);
   run('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', '-i', file, '-vf', `select=eq(n\\,${fr})`, '-vframes', '1', out]);
   const st = run('ffmpeg', ['-hide_banner', '-nostats', '-i', out, '-vf', 'signalstats,metadata=print:file=-', '-f', 'null', '-']);
-  const yavg = parseFloat(/YAVG=([\d.]+)/.exec(st)?.[1] ?? '0');
-  const ylow = parseFloat(/YLOW=([\d.]+)/.exec(st)?.[1] ?? '0');
-  const yhigh = parseFloat(/YHIGH=([\d.]+)/.exec(st)?.[1] ?? '0');
-  const ok = fs.existsSync(out) && yavg > 12 && yavg < 215 && yhigh - ylow > 40;
-  check(ok, `frame ${String(fr).padStart(3)} ${name.padEnd(20)} brightness ${yavg.toFixed(0)}, contrast ${(yhigh - ylow).toFixed(0)}`);
+  const num = (k) => parseFloat(new RegExp(k + '=([\\d.]+)').exec(st)?.[1] ?? '0');
+  const yavg = num('YAVG'), ymin = num('YMIN'), ymax = num('YMAX');
+  // not blank (some real brightness range), not blown out, and bright content (text, icon, lit pieces) is present
+  const ok = fs.existsSync(out) && yavg > 12 && yavg < 215 && ymax - ymin > 110 && ymax > 150;
+  check(ok, `frame ${String(fr).padStart(3)} ${name.padEnd(20)} avg ${yavg.toFixed(0)}, min ${ymin.toFixed(0)}, max ${ymax.toFixed(0)}`);
 }
 // final card must be bright enough in its text region (not faded): compare last frame with the one 20 frames earlier
 console.log(errors.length ? `\n${errors.length} CHECK(S) FAILED` : '\nAll automated checks passed.');

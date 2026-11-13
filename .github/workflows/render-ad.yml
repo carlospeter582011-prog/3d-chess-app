@@ -11,6 +11,10 @@ on:
         description: Publish the videos to the ad-video-v2 pre-release
         type: boolean
         default: true
+      reuse_run_id:
+        description: "Optional: id of an earlier run whose rendered videos should be re-validated/published instead of rendering again"
+        type: string
+        default: ''
 
 concurrency:
   group: render-ad-video
@@ -27,6 +31,7 @@ jobs:
     timeout-minutes: 240
     permissions:
       contents: write
+      actions: read
     defaults:
       run:
         working-directory: ad-video
@@ -59,9 +64,32 @@ jobs:
           npx remotion still src/index.ts AdLandscape out/smoke-l.png --frame=447 --timeout=240000
           npx remotion still src/index.ts AdVertical out/smoke-v.png --frame=447 --timeout=240000
       - name: Render vertical (9:16, 1080x1920)
+        if: inputs.reuse_run_id == ''
         run: npx remotion render src/index.ts AdVertical "out/$V_FILE" --codec=h264 --pixel-format=yuv420p --crf=18 --audio-codec=aac --audio-bitrate=192k --concurrency=$(nproc) --timeout=240000
       - name: Render landscape (16:9, 1920x1080)
+        if: inputs.reuse_run_id == ''
         run: npx remotion render src/index.ts AdLandscape "out/$L_FILE" --codec=h264 --pixel-format=yuv420p --crf=18 --audio-codec=aac --audio-bitrate=192k --concurrency=$(nproc) --timeout=240000
+      - name: Reuse rendered videos from an earlier run
+        if: inputs.reuse_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: 3d-chess-cinematic-v2
+          path: ad-video/out
+          run-id: ${{ inputs.reuse_run_id }}
+          github-token: ${{ github.token }}
+      - name: Normalise to limited-range yuv420p (maximum player compatibility)
+        run: |
+          for f in "$V_FILE" "$L_FILE"; do
+            pf=$(ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of csv=p=0 "out/$f")
+            echo "$f pix_fmt=$pf"
+            if [ "$pf" != "yuv420p" ]; then
+              ffmpeg -y -hide_banner -loglevel error -i "out/$f" \
+                -vf "scale=in_range=pc:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv420p" \
+                -c:v libx264 -preset slow -crf 17 -pix_fmt yuv420p -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv \
+                -c:a copy -movflags +faststart "out/norm-$f"
+              mv "out/norm-$f" "out/$f"
+            fi
+          done
       - name: Validate both videos and extract QA frames
         run: |
           node scripts/validate-video.mjs vertical "out/$V_FILE" out/qa-frames
