@@ -13,7 +13,7 @@ export const HookText: React.FC = () => {
   const { portrait, u, width, height, safe } = useLayout();
   const lines = portrait ? [["THIS", "ISN'T"], ['ORDINARY'], ['CHESS.']] : [["THIS", "ISN'T", 'ORDINARY'], ['CHESS.']];
   const size = portrait ? u * 0.115 : u * 0.115;
-  const out = interpolate(f, [80, 94], [0, 1], clamp);
+  const out = interpolate(f, [66, 80], [0, 1], clamp);
   let w = 0;
   return (
     <AbsoluteFill style={{ opacity: 1 - out, transform: `translateY(${-out * 30}px)` }}>
@@ -48,7 +48,7 @@ export const CheckmateText: React.FC<{ at: number; out: number }> = ({ at, out }
   const k = spring({ frame: f - at, fps, config: { damping: 16, stiffness: 90 } });
   const alpha = interpolate(f, [at, at + 6, out, out + 10], [0, 1, 1, 0], clamp);
   const size = portrait ? u * 0.093 : u * 0.12;
-  const spacing = interpolate(k, [0, 1], [size * 0.55, size * 0.1]);
+  const spacing = interpolate(k, [0, 1], [size * 0.2, size * 0.1]);
   const flash = interpolate(f, [at - 1, at + 2, at + 14], [0, 0.35, 0], clamp);
   return (
     <AbsoluteFill>

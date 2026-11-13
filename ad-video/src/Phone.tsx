@@ -15,7 +15,7 @@ export const FEATURES = [
   { a: 2, b: 54, title: 'Play the computer', sub: 'Stockfish runs on your device · 400–3200 Elo' },
   { a: 57, b: 102, title: '2 players, 1 phone', sub: 'Pass it back and forth · no internet needed' },
   { a: 105, b: 148, title: 'A fully 3D board', sub: 'Real Staunton pieces on a real 3D table' },
-  { a: 151, b: 190, title: 'Orbit · Zoom · Top view', sub: 'Turn the board to any angle you like' },
+  { a: 151, b: 190, title: 'Every angle', sub: 'Orbit, zoom and switch to the top view' },
 ];
 
 const Chips: React.FC<{ lf: number }> = ({ lf }) => {
