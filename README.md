@@ -38,3 +38,5 @@ levels and the native library alignment, and publishes the APK and AAB after a s
 
 `tools/prepare_assets.mjs` converts the original models: WebP textures to JPEG (Filament cannot decode WebP) and
 generates the table and the flat board markers.
+
+APK and AAB builds are published automatically to GitHub Releases on every push to main.
